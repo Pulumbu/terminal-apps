@@ -1,0 +1,80 @@
+# PortoScan
+
+An **authorized-use** TCP port scanner with a modern Textual UI. You supply the
+targets; PortoScan scans them — fast, polite, and legible.
+
+See [`PORTOSCAN.md`](PORTOSCAN.md) for the full design & feature spec. This README is the
+quick start.
+
+## Authorized use only
+
+PortoScan scans the targets **you** supply: an uploaded `.txt`, pasted entries, or hosts
+expanded from **CIDR / dotted ranges you own**. It has **no** random or by-country public-IP
+target generation — generating strangers' IPs and scanning them is unauthorized scanning of
+third parties. Scan only systems you own or have explicit, written authorization to test.
+On first run it asks you to acknowledge this; private/loopback scopes are frictionless.
+
+## Install & run
+
+```bash
+cd PortoScan
+python -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev]"
+
+portoscan                       # launch the TUI
+portoscan targets.txt           # preload a targets file
+portoscan --paths               # show app-data locations
+portoscan --version
+```
+
+Keys: `s` scan · `x` stop · `/` filter · `e` export · `,` settings · `ctrl+t` theme ·
+`ctrl+p` command palette · `F1` help · `ctrl+q` quit.
+
+## What it does
+
+- **Targets you supply**: upload `.txt`, paste, or expand `10.0.0.0/24` / `192.168.1.10-20`
+- **Ports**: profiles (Top 100, Web, Databases, Remote admin, Mail, Full) or a custom spec
+  like `22,80,443,8000-8100`
+- **Scan**: async TCP connect, bounded concurrency, adaptive backoff, three honest states
+  (open / closed / filtered), optional banner grab, per-environment rate presets, cancellable
+- **Results**: live sortable table, CSV/JSON export, SQLite scan history
+- **UX**: two themes + high-contrast, `NO_COLOR` support, scope banner, progress meter,
+  command palette, responsive layout
+
+## Develop & test
+
+```bash
+pytest                          # 33 tests (domain, engine, storage, Pilot)
+textual run --dev src/portoscan/app.py   # live CSS reload + devtools
+ruff check src tests
+```
+
+Tests scan only `127.0.0.1` against listeners they start themselves.
+
+## Layout
+
+```
+src/portoscan/
+├── __main__.py / cli.py     # entry points (freeze_support, lazy TUI import)
+├── app.py                   # the Textual App
+├── scan.py                  # async TCP-connect engine (no Textual)
+├── targets.py               # CIDR/range/hostname expansion (no Textual)
+├── ports.py                 # profiles + nmap top-100 (no Textual)
+├── authorization.py         # scope classification + ack text (no Textual)
+├── export.py                # CSV/JSON (no Textual)
+├── storage.py paths.py      # settings, SQLite history, app-data
+├── themes.py icons.py       # midnight / amber-crt / high-contrast, glyph tiers
+├── widgets/                 # ScopeBanner, ScanMeter (line API)
+├── screens/                 # Authorize, Confirm, Settings
+└── styles/base.tcss
+```
+
+The engine, parsing and export import **no Textual** and are unit-tested without an event
+loop. Built on the techniques in
+[`../docs/ADVANCED-TERMINAL-APPS-PYTHON.md`](../docs/ADVANCED-TERMINAL-APPS-PYTHON.md).
+
+## Not built, by design
+
+Random public-IP generation · country/geography target generation · raw-socket/SYN scanning ·
+vulnerability detection or exploitation. PortoScan scans what you point it at, and helps you
+point it only at what you're allowed to.

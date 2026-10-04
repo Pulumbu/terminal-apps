@@ -1,0 +1,41 @@
+Screen { layers: base overlay; background: $background; }
+
+#body { height: 1fr; }
+
+#targets {
+    width: 36;
+    border-right: vkey $primary-muted;
+    padding: 0 1;
+}
+#targets Label.section { text-style: bold; color: $text-primary; margin-top: 1; }
+#target-input { height: 8; border: round $primary-muted; }
+#port-spec { height: 3; }
+#scan-row { height: auto; align-horizontal: center; padding-top: 1; }
+
+#results-pane { padding: 0 1; }
+#results { height: 1fr; }
+
+#results > .datatable--header { background: $primary-muted; text-style: bold; }
+#results > .datatable--cursor { background: $primary 40%; text-style: bold; }
+
+.state-open     { color: $text-success; }
+.state-closed   { color: $text-muted; }
+.state-filtered { color: $text-warning; }
+.state-error    { color: $text-error; }
+
+#statusbar {
+    dock: bottom;
+    height: 1;
+    background: $panel;
+    color: $text-muted;
+    padding: 0 1;
+    layout: horizontal;
+}
+#statusbar Label { width: auto; margin-right: 2; }
+#meter { width: 24; }
+
+#new-row { background: $primary 25%; }
+
+Screen.-narrow #targets { display: none; }
+
+Screen:nocolor #results > .datatable--cursor { text-style: reverse bold; }
