@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Nocturne
+Comment=Terminal log explorer
+Exec=nocturne %F
+Icon=nocturne
+Terminal=true
+Categories=Development;Utility;ConsoleOnly;
+MimeType=text/plain;application/json;

@@ -1,0 +1,57 @@
+/* Base chrome. Hot-reloaded by `textual run --dev`. */
+
+Screen {
+    layers: base overlay toasts;
+    background: $background;
+}
+
+#body { height: 1fr; }
+
+#sidebar {
+    width: 30;
+    border-right: vkey $primary-muted;
+    padding: 0 1;
+}
+
+#content { padding: 0 1; }
+
+#search { border: none; padding: 0; height: 1; }
+
+#facets {
+    height: auto;
+    border: round $primary-muted;
+    border-title-align: left;
+    padding: 0 1;
+    margin-top: 1;
+}
+
+#rows { height: 1fr; }
+
+#rows > .datatable--header       { background: $primary-muted; text-style: bold; }
+#rows > .datatable--header-hover { background: $primary; }
+#rows > .datatable--cursor       { background: $primary 40%; text-style: bold; }
+#rows > .datatable--hover        { background: $boost; }
+
+#statusbar {
+    dock: bottom;
+    height: 1;
+    background: $panel;
+    color: $text-muted;
+    padding: 0 1;
+}
+
+Sparkline {
+    height: 3;
+    margin-top: 1;
+    & > .sparkline--max-color { color: $error; }
+    & > .sparkline--min-color { color: $success; }
+}
+
+Input.-invalid { outline: tall $error; }
+
+/* Responsive: driven by App.HORIZONTAL_BREAKPOINTS. */
+Screen.-narrow #sidebar { display: none; }
+Screen.-wide   #sidebar { width: 38; }
+
+/* Accessibility: state must survive NO_COLOR. */
+Screen:nocolor #rows > .datatable--cursor { text-style: reverse bold; }

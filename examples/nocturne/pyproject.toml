@@ -1,0 +1,53 @@
+[project]
+name = "nocturne"
+version = "1.0.0"
+description = "Reference application for the advanced terminal apps handbook"
+requires-python = ">=3.10"
+dependencies = [
+    "textual>=8.2,<9",
+    "platformdirs>=4,<5",
+    "rich>=14.2",
+]
+
+[project.optional-dependencies]
+syntax = ["textual[syntax]>=8.2,<9"]
+dev = [
+    "textual-dev>=1.8",
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "pytest-textual-snapshot",
+    "pyinstaller>=6.11",
+    "pillow>=10",
+    "ruff",
+]
+
+[project.scripts]
+nocturne = "nocturne.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nocturne"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RUF"]
+ignore = [
+    # Textual's own idioms: BINDINGS / CSS_PATH / COMPONENT_CLASSES are class-level
+    # mutable defaults by design.
+    "RUF012",
+    # This app deliberately uses look-alike Unicode symbols as icons.
+    "RUF001",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
