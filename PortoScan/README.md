@@ -33,8 +33,9 @@ Keys: `s` scan · `x` stop · `/` filter · `e` export · `i` import · `h` hist
 ## What it does
 
 - **Targets you supply**: upload `.txt`, paste, or expand `10.0.0.0/24` / `192.168.1.10-20`
-- **Ports**: profiles (Top 100, Web, Databases, Remote admin, Mail, Full) or a custom spec
-  like `22,80,443,8000-8100`
+- **Ports**: tick any combination of categories (Top 100, Web, Databases, Remote admin,
+  Mail, Full) — they're **unioned** into one scan — and the custom box adds extra ports on
+  top, e.g. `22,80,443,8000-8100`. Untick everything to scan only the custom ports.
 - **Scan**: async TCP connect, bounded concurrency, adaptive backoff, three honest states
   (open / closed / filtered), optional banner grab, per-environment rate presets, cancellable
 - **Results**: live table with a **filter box** (type text, or a state like `open`),

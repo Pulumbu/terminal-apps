@@ -9,6 +9,7 @@ Screen { layers: base overlay; background: $background; }
 }
 #targets Label.section { text-style: bold; color: $text-primary; margin-top: 1; }
 #target-input { height: 8; border: round $primary-muted; }
+#profiles { height: auto; max-height: 8; border: round $primary-muted; }
 #port-spec { height: 3; }
 #scan-row { height: auto; align-horizontal: center; padding-top: 1; }
 

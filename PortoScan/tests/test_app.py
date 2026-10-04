@@ -52,6 +52,8 @@ async def test_scan_localhost_fills_table():
     app.settings.authorized_ack = True
     async with server, app.run_test(size=(120, 36)) as pilot:
         await pilot.pause(0.2)
+        from textual.widgets import SelectionList
+        app.screen.query_one("#profiles", SelectionList).deselect_all()
         app.screen.query_one("#target-input", TextArea).text = "127.0.0.1"
         app.screen.query_one("#port-spec", TextArea).text = f"{open_port},{closed_port}"
         app.screen.query_one("#rate", Select).value = "localhost"
@@ -68,16 +70,30 @@ async def test_scan_localhost_fills_table():
         assert app.screen.query_one("#results", DataTable).row_count == 2
 
 
-async def test_custom_port_spec_overrides_profile():
+async def test_port_selection_unions_categories_and_custom():
+    from textual.widgets import SelectionList
     app = PortoScan()
     app.settings.authorized_ack = True
     async with app.run_test(size=(120, 36)) as pilot:
         await pilot.pause(0.2)
-        app.screen.query_one("#port-spec", TextArea).text = "22,80,443"
-        assert app._selected_ports() == [22, 80, 443]
-        app.screen.query_one("#port-spec", TextArea).text = ""
-        app.screen.query_one("#profile", Select).value = "web"
-        assert 8443 in app._selected_ports()
+        profiles = app.screen.query_one("#profiles", SelectionList)
+        # tick Web + Remote admin together
+        profiles.deselect_all()
+        profiles.select("web")
+        profiles.select("admin")
+        await pilot.pause(0.1)
+        ports = set(app._selected_ports())
+        assert {80, 443, 8443} <= ports        # web
+        assert {22, 3389, 5900} <= ports       # remote admin (RDP, VNC)
+        # custom box ADDS extra ports on top of the ticked categories
+        app.screen.query_one("#port-spec", TextArea).text = "9999"
+        await pilot.pause(0.1)
+        ports2 = set(app._selected_ports())
+        assert 9999 in ports2 and {80, 22} <= ports2
+        # untick everything -> only the custom ports remain
+        profiles.deselect_all()
+        await pilot.pause(0.1)
+        assert app._selected_ports() == [9999]
 
 
 async def test_stop_sets_cancel_flag():
@@ -135,6 +151,8 @@ async def test_auto_save_writes_run_folder(tmp_path, monkeypatch):
     app.settings.output_format = "txt"
     async with server, app.run_test(size=(120, 36)) as pilot:
         await pilot.pause(0.2)
+        from textual.widgets import SelectionList
+        app.screen.query_one("#profiles", SelectionList).deselect_all()
         app.screen.query_one("#target-input", TextArea).text = "127.0.0.1"
         app.screen.query_one("#port-spec", TextArea).text = str(port)
         app.screen.query_one("#rate", Select).value = "localhost"

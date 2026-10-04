@@ -24,8 +24,10 @@ from textual.widgets import (
     Input,
     Label,
     Select,
+    SelectionList,
     TextArea,
 )
+from textual.widgets.selection_list import Selection
 
 from portoscan import export, results_io
 from portoscan.authorization import classify
@@ -90,12 +92,15 @@ class PortoScan(App[int]):
                 with HorizontalGroup():
                     yield Button("Open .txt", id="open", compact=True)
                     yield Button("Preview", id="preview", compact=True)
-                yield Label("Ports", classes="section")
-                yield Select([(p.label, p.key) for p in PROFILES],
-                             value=self.settings.port_profile, allow_blank=False,
-                             id="profile")
+                yield Label("Ports (tick any; combined)", classes="section")
+                yield SelectionList[str](
+                    *[Selection(p.label, p.key, p.key == self.settings.port_profile)
+                      for p in PROFILES],
+                    id="profiles",
+                )
                 yield TextArea("", id="port-spec", soft_wrap=True,
-                               tooltip="Custom: 22,80,443,8000-8100 (overrides profile)")
+                               tooltip="Extra ports, added to the ticked categories: "
+                                       "22,80,443,8000-8100")
                 yield Label("Rate preset", classes="section")
                 yield Select([(p.label, p.key) for p in PRESETS],
                              value=self.settings.rate_preset, allow_blank=False,
@@ -141,12 +146,18 @@ class PortoScan(App[int]):
     def _target_text(self) -> str:
         return self.query_one("#target-input", TextArea).text
 
+    def _ticked_profiles(self) -> list[str]:
+        return list(self.query_one("#profiles", SelectionList).selected)
+
     def _selected_ports(self) -> list[int]:
+        """Union of every ticked category plus any ports in the custom box."""
+        ports: set[int] = set()
+        for key in self._ticked_profiles():
+            ports.update(PROFILE_BY_KEY[key].ports)
         spec = self.query_one("#port-spec", TextArea).text.strip()
         if spec:
-            return parse_ports(spec)
-        key = str(self.query_one("#profile", Select).value)
-        return list(PROFILE_BY_KEY[key].ports)
+            ports.update(parse_ports(spec))
+        return sorted(ports)
 
     def _refresh_scope(self) -> None:
         parsed = expand(self._target_text())
@@ -160,7 +171,7 @@ class PortoScan(App[int]):
 
     @on(TextArea.Changed, "#target-input")
     @on(TextArea.Changed, "#port-spec")
-    @on(Select.Changed, "#profile")
+    @on(SelectionList.SelectedChanged, "#profiles")
     @on(Select.Changed, "#rate")
     def _inputs_changed(self) -> None:
         self._refresh_scope()
@@ -222,11 +233,13 @@ class PortoScan(App[int]):
         except ValueError as error:
             self.notify(f"Bad port spec: {error}", severity="error")
             return
-        profile_key = str(self.query_one("#profile", Select).value)
-        using_profile = self.query_one("#port-spec", TextArea).text.strip() == ""
-        if using_profile and PROFILE_BY_KEY[profile_key].warn and not await self.push_screen_wait(
-            Confirm(f"A full 1-65535 scan of {len(parsed.hosts)} host(s) is "
-                    f"{len(parsed.hosts) * len(ports)} connections. Continue?", ok="Scan")
+        if not ports:
+            self.notify("No ports selected", severity="warning")
+            return
+        warns = any(PROFILE_BY_KEY[k].warn for k in self._ticked_profiles())
+        if (warns or len(ports) > 10000) and not await self.push_screen_wait(
+            Confirm(f"This scans {len(parsed.hosts)} host(s) x {len(ports)} ports "
+                    f"= {len(parsed.hosts) * len(ports)} connections. Continue?", ok="Scan")
         ):
             return
         self._run_scan(parsed.hosts, ports)
@@ -417,7 +430,9 @@ class PortoScan(App[int]):
         self.settings = updated
         self.theme = updated.theme
         self._glyphs = glyphs(updated.icons)
-        self.query_one("#profile", Select).value = updated.port_profile
+        profiles = self.query_one("#profiles", SelectionList)
+        profiles.deselect_all()
+        profiles.select(updated.port_profile)
         self.query_one("#rate", Select).value = updated.rate_preset
         self._persist()
         self._refresh_scope()
