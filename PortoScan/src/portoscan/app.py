@@ -31,11 +31,20 @@ from textual.widgets.selection_list import Selection
 
 from portoscan import export, results_io
 from portoscan.authorization import classify
+from portoscan.diff import diff_scans
 from portoscan.icons import glyphs
 from portoscan.paths import Paths, resource_path
 from portoscan.ports import PROFILE_BY_KEY, PROFILES, parse_ports
 from portoscan.scan import PRESET_BY_KEY, PRESETS, Progress, Result, scan
-from portoscan.screens import AuthorizeScreen, Confirm, HistoryScreen, SettingsScreen
+from portoscan.screens import (
+    AuthorizeScreen,
+    Confirm,
+    DiffScreen,
+    HistoryScreen,
+    PresetsScreen,
+    PromptScreen,
+    SettingsScreen,
+)
 from portoscan.storage import Settings, load_scan, recent_scans, save_scan
 from portoscan.targets import expand
 from portoscan.themes import ALL_THEMES
@@ -43,6 +52,21 @@ from portoscan.widgets import ScanMeter, ScopeBanner
 
 log = logging.getLogger(__name__)
 STATE_ORDER = {"open": 0, "filtered": 1, "error": 2, "closed": 3}
+
+SORT_KEYS = {
+    "host": lambda r: (r.host, r.port),
+    "port": lambda r: (r.port, r.host),
+    "state": lambda r: (STATE_ORDER.get(r.state, 9), r.host, r.port),
+    "service": lambda r: (r.service, r.host, r.port),
+    "latency": lambda r: (r.latency_ms, r.host, r.port),
+    "banner": lambda r: (r.banner, r.host, r.port),
+}
+STATE_FILTERS = {
+    "all": {"open", "closed", "filtered", "error"},
+    "open": {"open"},
+    "notclosed": {"open", "filtered", "error"},
+    "openfiltered": {"open", "filtered"},
+}
 
 
 class PortoScan(App[int]):
@@ -57,6 +81,9 @@ class PortoScan(App[int]):
         Binding("e", "export", "Export", id="export"),
         Binding("i", "import_results", "Import", id="import"),
         Binding("h", "history", "History", id="history"),
+        Binding("d", "diff", "Diff", id="diff"),
+        Binding("ctrl+s", "save_preset", "Save preset", id="save-preset"),
+        Binding("ctrl+l", "load_preset", "Presets", id="load-preset"),
         Binding("comma", "settings", "Settings", id="settings"),
         Binding("ctrl+t", "cycle_theme", "Theme", id="theme"),
         Binding("f1", "show_help_panel", "Help", id="help"),
@@ -64,8 +91,9 @@ class PortoScan(App[int]):
     HELP = """
     ## PortoScan
     Scan only systems you own or are authorized to test.
-    - `s` scan, `x` stop, `/` filter results, `e` export
-    - `,` settings, `ctrl+t` theme, `ctrl+p` command palette
+    - `s` scan, `x` stop, `/` filter results, click a header to sort
+    - `e` export, `i` import, `h` history, `d` diff two scans
+    - `ctrl+s` save preset, `ctrl+l` presets, `,` settings, `ctrl+t` theme
     """
 
     scanning: reactive[bool] = reactive(False)
@@ -79,6 +107,9 @@ class PortoScan(App[int]):
         self._results: list[Result] = []
         self._cancel = False
         self._filter_text = ""
+        self._sort_col: str | None = None
+        self._sort_reverse = False
+        self._visible_states = STATE_FILTERS["all"]
 
     # ---------------------------------------------------------------- compose
     def compose(self) -> ComposeResult:
@@ -109,8 +140,13 @@ class PortoScan(App[int]):
                     yield Button("Scan", id="scan", variant="primary")
                     yield Button("Stop", id="stop", variant="error", disabled=True)
             with VerticalScroll(id="results-pane"):
-                yield Input(placeholder="filter results: text, or a state like 'open'",
-                            id="filter")
+                with HorizontalGroup(id="results-tools"):
+                    yield Input(placeholder="filter: text, or a state like 'open'",
+                                id="filter")
+                    yield Select(
+                        [("All states", "all"), ("Open only", "open"),
+                         ("Not closed", "notclosed"), ("Open+Filtered", "openfiltered")],
+                        value="all", allow_blank=False, id="state-filter")
                 yield DataTable(id="results", cursor_type="row", zebra_stripes=True)
         with HorizontalGroup(id="statusbar"):
             yield Label("idle", id="status")
@@ -282,12 +318,20 @@ class PortoScan(App[int]):
             self._auto_save(results, scope)
 
     def _matches(self, result: Result) -> bool:
+        if result.state not in self._visible_states:
+            return False
         query = self._filter_text.strip().lower()
         if not query:
             return True
         haystack = (f"{result.host} {result.port} {result.state} "
                     f"{result.service} {result.banner}").lower()
         return all(term in haystack for term in query.split())
+
+    def _sorted_results(self) -> list[Result]:
+        if self._sort_col is None:
+            return self._results
+        return sorted(self._results, key=SORT_KEYS[self._sort_col],
+                      reverse=self._sort_reverse)
 
     def _add_row(self, table: DataTable, result: Result) -> None:
         if not self._matches(result):
@@ -308,7 +352,7 @@ class PortoScan(App[int]):
         with self.app.batch_update():
             table.clear()
             shown = 0
-            for result in self._results:
+            for result in self._sorted_results():
                 if self._matches(result):
                     self._add_row(table, result)
                     shown += 1
@@ -320,6 +364,20 @@ class PortoScan(App[int]):
     @on(Input.Changed, "#filter")
     def _filter_changed(self, event: Input.Changed) -> None:
         self._filter_text = event.value
+        self._rerender()
+
+    @on(Select.Changed, "#state-filter")
+    def _state_filter_changed(self, event: Select.Changed) -> None:
+        self._visible_states = STATE_FILTERS[str(event.value)]
+        self._rerender()
+
+    @on(DataTable.HeaderSelected, "#results")
+    def _sort_by_header(self, event: DataTable.HeaderSelected) -> None:
+        key = str(event.column_key.value)
+        if key not in SORT_KEYS:
+            return
+        self._sort_reverse = (not self._sort_reverse) if key == self._sort_col else False
+        self._sort_col = key
         self._rerender()
 
     def watch_scanning(self, scanning: bool) -> None:
@@ -395,6 +453,76 @@ class PortoScan(App[int]):
         self._results = results
         self._rerender()
         self.notify(f"Loaded scan #{scan_id}: {len(results)} results")
+
+    # ------------------------------------------------------------------ diff
+    @work
+    async def action_diff(self) -> None:
+        scans = recent_scans(self.paths.database)
+        if len(scans) < 2:
+            self.notify("Need at least two saved scans to diff", severity="warning")
+            return
+        baseline = await self.push_screen_wait(HistoryScreen(scans))
+        if baseline is None:
+            return
+        current = await self.push_screen_wait(HistoryScreen(scans))
+        if current is None:
+            return
+        report = diff_scans(
+            load_scan(self.paths.database, baseline),
+            load_scan(self.paths.database, current),
+        )
+        await self.push_screen_wait(
+            DiffScreen(report, baseline=str(baseline), current=str(current)))
+
+    # --------------------------------------------------------------- presets
+    @work
+    async def action_save_preset(self) -> None:
+        name = await self.push_screen_wait(PromptScreen("Name this preset:"))
+        if not name:
+            return
+        preset = {
+            "name": name,
+            "targets": self._target_text(),
+            "profiles": self._ticked_profiles(),
+            "custom_ports": self.query_one("#port-spec", TextArea).text.strip(),
+            "rate": str(self.query_one("#rate", Select).value),
+        }
+        self.settings.presets = [p for p in self.settings.presets
+                                 if p.get("name") != name] + [preset]
+        self._persist()
+        self.notify(f"Saved preset '{name}'")
+
+    @work
+    async def action_load_preset(self) -> None:
+        names = [p.get("name", "") for p in self.settings.presets]
+        choice = await self.push_screen_wait(PresetsScreen(names))
+        if choice is None:
+            return
+        action, name = choice
+        if action == "delete":
+            self.settings.presets = [p for p in self.settings.presets
+                                     if p.get("name") != name]
+            self._persist()
+            self.notify(f"Deleted preset '{name}'")
+            return
+        preset = next((p for p in self.settings.presets if p.get("name") == name), None)
+        if preset is None:
+            return
+        self._apply_preset(preset)
+        self.notify(f"Loaded preset '{name}'")
+
+    def _apply_preset(self, preset: dict) -> None:
+        self.query_one("#target-input", TextArea).text = preset.get("targets", "")
+        self.query_one("#port-spec", TextArea).text = preset.get("custom_ports", "")
+        profiles = self.query_one("#profiles", SelectionList)
+        profiles.deselect_all()
+        for key in preset.get("profiles", []):
+            if key in PROFILE_BY_KEY:
+                profiles.select(key)
+        rate = preset.get("rate", "lan")
+        if rate in PRESET_BY_KEY:
+            self.query_one("#rate", Select).value = rate
+        self._refresh_scope()
 
     # ---------------------------------------------------------------- export
     @work

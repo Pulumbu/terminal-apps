@@ -190,3 +190,107 @@ async def test_history_round_trip_loads_results():
         await pilot.press("enter")
         await pilot.pause(0.3)
         assert len(app._results) == 1 and app._results[0].port == 80
+
+
+async def test_header_click_sorts_results():
+    from portoscan.scan import Result
+    app = PortoScan()
+    app.settings.authorized_ack = True
+    async with app.run_test(size=(120, 36)) as pilot:
+        await pilot.pause(0.2)
+        app._results = [
+            Result("10.0.0.1", 80, "closed", 5.0, "http", ""),
+            Result("10.0.0.1", 22, "open", 1.0, "ssh", ""),
+            Result("10.0.0.1", 443, "filtered", 9.0, "https", ""),
+        ]
+        app._rerender()
+        # sort by state: open first, then filtered, then closed (STATE_ORDER)
+        app._sort_col = "state"
+        app._sort_reverse = False
+        assert [x.state for x in app._sorted_results()] == ["open", "filtered", "closed"]
+        app._sort_col = "port"
+        assert [x.port for x in app._sorted_results()] == [22, 80, 443]
+        app._sort_reverse = True
+        assert [x.port for x in app._sorted_results()] == [443, 80, 22]
+
+
+async def test_state_filter_select():
+    from textual.widgets import DataTable, Select
+
+    from portoscan.scan import Result
+    app = PortoScan()
+    app.settings.authorized_ack = True
+    async with app.run_test(size=(120, 36)) as pilot:
+        await pilot.pause(0.2)
+        app._results = [
+            Result("10.0.0.1", 22, "open", 1.0, "", ""),
+            Result("10.0.0.1", 80, "closed", 1.0, "", ""),
+            Result("10.0.0.1", 443, "filtered", 1.0, "", ""),
+        ]
+        app._rerender()
+        table = app.screen.query_one("#results", DataTable)
+        assert table.row_count == 3
+        app.screen.query_one("#state-filter", Select).value = "open"
+        await pilot.pause(0.1)
+        assert table.row_count == 1
+        app.screen.query_one("#state-filter", Select).value = "notclosed"
+        await pilot.pause(0.1)
+        assert table.row_count == 2
+
+
+async def test_save_and_load_preset():
+    from textual.widgets import Input, Select, SelectionList, TextArea
+    app = PortoScan()
+    app.settings.authorized_ack = True
+    async with app.run_test(size=(120, 36)) as pilot:
+        await pilot.pause(0.2)
+        app.screen.query_one("#target-input", TextArea).text = "10.0.0.0/30"
+        profiles = app.screen.query_one("#profiles", SelectionList)
+        profiles.deselect_all()
+        profiles.select("web")
+        profiles.select("db")
+        app.screen.query_one("#port-spec", TextArea).text = "9999"
+        app.screen.query_one("#rate", Select).value = "internet"
+        await pilot.pause(0.1)
+        # save
+        app.action_save_preset()
+        await pilot.pause(0.2)
+        app.screen.query_one("#value", Input).value = "my-preset"
+        await pilot.press("enter")
+        await pilot.pause(0.2)
+        assert any(p["name"] == "my-preset" for p in app.settings.presets)
+        # change everything, then load it back
+        app.screen.query_one("#target-input", TextArea).text = ""
+        profiles.deselect_all()
+        app.screen.query_one("#port-spec", TextArea).text = ""
+        await pilot.pause(0.1)
+        preset = next(p for p in app.settings.presets if p["name"] == "my-preset")
+        app._apply_preset(preset)
+        await pilot.pause(0.1)
+        assert app.screen.query_one("#target-input", TextArea).text == "10.0.0.0/30"
+        assert set(profiles.selected) == {"web", "db"}
+        assert app.screen.query_one("#port-spec", TextArea).text == "9999"
+        assert str(app.screen.query_one("#rate", Select).value) == "internet"
+
+
+async def test_diff_action_shows_screen():
+    from portoscan.scan import Result
+    from portoscan.screens import DiffScreen
+    from portoscan.storage import save_scan
+    app = PortoScan()
+    app.settings.authorized_ack = True
+    save_scan(app.paths.database, scope="s", hosts=1, ports=1,
+              results=[Result("10.0.0.1", 22, "open", 1.0, "", "")])
+    save_scan(app.paths.database, scope="s", hosts=1, ports=1,
+              results=[Result("10.0.0.1", 22, "closed", 1.0, "", "")])
+    async with app.run_test(size=(120, 36)) as pilot:
+        await pilot.pause(0.2)
+        app.action_diff()
+        await pilot.pause(0.3)
+        from portoscan.screens import HistoryScreen
+        assert isinstance(app.screen, HistoryScreen)
+        await pilot.press("enter")          # pick baseline (newest)
+        await pilot.pause(0.2)
+        await pilot.press("down", "enter")  # pick the other
+        await pilot.pause(0.2)
+        assert isinstance(app.screen, DiffScreen)

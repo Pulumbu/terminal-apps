@@ -28,7 +28,8 @@ portoscan --version
 ```
 
 Keys: `s` scan · `x` stop · `/` filter · `e` export · `i` import · `h` history ·
-`,` settings · `ctrl+t` theme · `ctrl+p` command palette · `F1` help · `ctrl+q` quit.
+`d` diff two scans · `ctrl+s` save preset · `ctrl+l` presets · `,` settings ·
+`ctrl+t` theme · `ctrl+p` command palette · `F1` help · `ctrl+q` quit.
 
 ## What it does
 
@@ -38,9 +39,14 @@ Keys: `s` scan · `x` stop · `/` filter · `e` export · `i` import · `h` hist
   top, e.g. `22,80,443,8000-8100`. Untick everything to scan only the custom ports.
 - **Scan**: async TCP connect, bounded concurrency, adaptive backoff, three honest states
   (open / closed / filtered), optional banner grab, per-environment rate presets, cancellable
-- **Results**: live table with a **filter box** (type text, or a state like `open`),
-  CSV/JSON **export** and **import**, and a **history** screen to re-open past scans from
-  the SQLite database
+- **Results**: live table with a **filter box** (type text, or a state like `open`), a
+  **state-filter dropdown** (All / Open only / Not closed / Open+Filtered), and
+  **click-to-sort** column headers. CSV/JSON **export** and **import**, plus a **history**
+  screen to re-open past scans from the SQLite database.
+- **Diff**: pick two past scans and see newly-open / newly-closed / changed ports — change
+  monitoring for your own infrastructure (`d`).
+- **Presets**: save a (targets + categories + custom ports + rate) combo by name and reload
+  it later (`ctrl+s` to save, `ctrl+l` to pick/delete).
 - **Auto-save**: every run creates `PortoScan Result/<timestamp>/` in the launch directory
   (falling back to Documents, then app-data, if that is not writable) containing
   `open`, `closed`, `filtered`, `all` and `summary` files. Default format is **txt**;

@@ -55,6 +55,7 @@ class Settings:
     output_format: str = "txt"     # txt | csv | json
     auto_save_dir: str = ""        # "" -> current working directory
     recent_files: list[str] = field(default_factory=list)
+    presets: list[dict] = field(default_factory=list)
 
     @classmethod
     def load(cls, path: Path) -> Settings:

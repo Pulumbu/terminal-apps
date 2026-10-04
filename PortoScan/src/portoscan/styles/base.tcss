@@ -14,6 +14,9 @@ Screen { layers: base overlay; background: $background; }
 #scan-row { height: auto; align-horizontal: center; padding-top: 1; }
 
 #results-pane { padding: 0 1; }
+#results-tools { height: 3; }
+#results-tools #filter { width: 1fr; }
+#results-tools #state-filter { width: 22; }
 #results { height: 1fr; }
 
 #results > .datatable--header { background: $primary-muted; text-style: bold; }
