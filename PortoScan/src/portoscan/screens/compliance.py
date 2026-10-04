@@ -21,13 +21,15 @@ class ComplianceScreen(ModalScreen[None]):
     """
     BINDINGS = [("escape", "dismiss", "Close")]
 
-    def __init__(self, findings: list[Finding]) -> None:
+    def __init__(self, findings: list[Finding],
+                 title: str = "Policy check (exposed risky services)") -> None:
         super().__init__()
         self.findings = findings
+        self._title = title
 
     def compose(self) -> ComposeResult:
         with Vertical(id="box"):
-            yield Label("Policy check (exposed risky services)", id="title")
+            yield Label(self._title, id="title")
             yield Label(summarize(self.findings))
             yield RichLog(id="log", markup=True, highlight=False)
 

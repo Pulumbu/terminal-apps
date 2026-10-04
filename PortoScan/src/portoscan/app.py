@@ -30,7 +30,7 @@ from textual.widgets import (
 )
 from textual.widgets.selection_list import Selection
 
-from portoscan import export, results_io
+from portoscan import export, results_io, sshcve, webcheck
 from portoscan.authorization import classify
 from portoscan.compliance import check as compliance_check
 from portoscan.diff import diff_scans
@@ -101,6 +101,7 @@ class PortoScan(App[int]):
         Binding("ctrl+r", "rescan_host", "Re-scan host", id="rescan-host"),
         Binding("t", "toggle_stats", "Stats", id="stats"),
         Binding("c", "compliance", "Policy", id="compliance"),
+        Binding("v", "vuln_checks", "Checks", id="vuln"),
         Binding("ctrl+s", "save_preset", "Save preset", id="save-preset"),
         Binding("ctrl+l", "load_preset", "Presets", id="load-preset"),
         Binding("comma", "settings", "Settings", id="settings"),
@@ -112,7 +113,8 @@ class PortoScan(App[int]):
     Scan only systems you own or are authorized to test.
     - `s` scan, `x` stop, `/` filter results, click a header to sort
     - `e` export, `i` import, `h` history, `d` diff two scans
-    - `r` re-scan open, `ctrl+r` re-scan host, `t` stats, `c` policy check
+    - `r` re-scan open, `ctrl+r` re-scan host, `t` stats
+    - `c` policy check, `v` vuln & exposure checks (SSH CVEs, exposed paths)
     - `ctrl+s` save preset, `ctrl+l` presets, `,` settings, `ctrl+t` theme
     """
 
@@ -127,6 +129,7 @@ class PortoScan(App[int]):
         self._results: list[Result] = []
         self._cancel = False
         self._filter_text = ""
+        self._deep_findings: list = []
         self._sort_col: str | None = None
         self._sort_reverse = False
         self._visible_states = STATE_FILTERS["all"]
@@ -632,6 +635,22 @@ class PortoScan(App[int]):
             self.query_one("#rate", Select).value = rate
         self._refresh_scope()
 
+    # ----------------------------------------------------------- deep checks
+    @work(exclusive=True, group="checks")
+    async def action_vuln_checks(self) -> None:
+        if not self._results:
+            self.notify("Run or load a scan first", severity="warning")
+            return
+        ssh_findings = sshcve.scan(self._results)
+        endpoints = webcheck.web_endpoints(self._results)
+        if endpoints:
+            self.notify(f"Checking {len(endpoints)} web endpoint(s) for exposed paths…")
+        web_findings = await webcheck.scan(self._results)
+        self._deep_findings = (compliance_check(self._results)
+                               + ssh_findings + web_findings)
+        await self.push_screen_wait(ComplianceScreen(
+            self._deep_findings, title="Vulnerability & exposure checks"))
+
     # ------------------------------------------------------------- compliance
     @work
     async def action_compliance(self) -> None:
@@ -662,7 +681,8 @@ class PortoScan(App[int]):
             text = "\n".join(f"{r.host}:{r.port}\t{r.state}\t{r.service}\t{r.banner}"
                               for r in self._results) + "\n"
         elif suffix in (".html", ".htm"):
-            text = render_report(self._results, scope=f"{len(self._results)} results")
+            text = render_report(self._results, scope=f"{len(self._results)} results",
+                                 extra_findings=self._deep_findings or None)
         else:
             text = export.to_csv(self._results)
         try:

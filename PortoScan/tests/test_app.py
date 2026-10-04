@@ -403,3 +403,38 @@ async def test_compliance_screen_lists_findings():
         assert isinstance(app.screen, ComplianceScreen)
         assert len(app.screen.findings) == 1   # only telnet flagged
         assert app.screen.findings[0].port == 23
+
+
+async def test_vuln_checks_action_combines_ssh_and_web():
+    import asyncio
+
+    from portoscan.scan import Result
+    from portoscan.screens import ComplianceScreen
+
+    async def handler(reader, writer):
+        req = await reader.read(1024)
+        path = req.split(b"\r\n", 1)[0].split()[1].decode()
+        if path == "/.env":
+            writer.write(b"HTTP/1.0 200 OK\r\n\r\nSECRET_KEY=abc\nDB_PASSWORD=x\n")
+        else:
+            writer.write(b"HTTP/1.0 404 Not Found\r\n\r\nx")
+        await writer.drain()
+        writer.close()
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+
+    app = PortoScan()
+    app.settings.authorized_ack = True
+    async with server, app.run_test(size=(120, 36)) as pilot:
+        await pilot.pause(0.2)
+        app._results = [
+            Result("127.0.0.1", port, "open", 1.0, "http", ""),
+            Result("127.0.0.1", 22, "open", 1.0, "ssh", "SSH-2.0-OpenSSH_8.9p1"),
+        ]
+        app.action_vuln_checks()
+        await pilot.pause(0.6)
+        assert isinstance(app.screen, ComplianceScreen)
+        messages = " ".join(f.message for f in app.screen.findings)
+        assert "/.env" in messages            # exposed path
+        assert "CVE-2024-6387" in messages    # ssh cve
+        assert "DB_PASSWORD" not in messages   # no secret captured

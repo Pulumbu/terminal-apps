@@ -26,10 +26,20 @@ def _esc(value: object) -> str:
 
 
 def render_report(results: Sequence[Result], *, scope: str = "",
-                  when: datetime | None = None) -> str:
+                  when: datetime | None = None,
+                  extra_findings: Sequence[Finding] | None = None) -> str:
     when = when or datetime.now()
     states = counts_by_state(results)
-    findings = check(results)
+    findings = list(check(results))
+    if extra_findings:
+        seen = {(f.severity, f.host, f.port, f.message) for f in findings}
+        for f in extra_findings:
+            key = (f.severity, f.host, f.port, f.message)
+            if key not in seen:
+                seen.add(key)
+                findings.append(f)
+        from portoscan.compliance import SEVERITY_ORDER
+        findings.sort(key=lambda f: (SEVERITY_ORDER.get(f.severity, 9), f.host, f.port))
     rows = sorted(results, key=lambda r: (r.host, r.port))
 
     def chips() -> str:

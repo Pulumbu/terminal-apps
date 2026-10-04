@@ -28,7 +28,7 @@ portoscan --version
 ```
 
 Keys: `s` scan · `x` stop · `/` filter · `e` export · `i` import · `h` history ·
-`d` diff · `r` re-scan open · `ctrl+r` re-scan host · `t` stats · `c` policy check ·
+`d` diff · `r` re-scan open · `ctrl+r` re-scan host · `t` stats · `c` policy · `v` vuln checks ·
 `ctrl+s` save preset · `ctrl+l` presets · `,` settings · `ctrl+t` theme · `ctrl+q` quit.
 
 ## What it does
@@ -62,6 +62,16 @@ Keys: `s` scan · `x` stop · `/` filter · `e` export · `i` import · `h` hist
   histogram and the top hosts by open-port count — updating as the scan runs.
 - **Policy / compliance check** (`c`): a rules pass flags open ports that expose risky or
   legacy services (Telnet, FTP, SMB, RDP, VNC, exposed databases, …) with severities.
+- **Vulnerability & exposure checks** (`v`), reporting-only:
+  - **SSH CVEs** — matches the OpenSSH banner (already grabbed) against a built-in set of
+    notable CVEs (regreSSHion CVE-2024-6387, Terrapin, ssh-agent RCE, …). Informational and
+    version-based: banners may be back-patched, so a match is a prompt to verify.
+  - **Exposed sensitive paths** — probes open web ports for `/.env`, `/.git/config`,
+    `/.aws/credentials`, `/.htpasswd`, `/server-status`, config backups. It reports only the
+    path, HTTP status and a "looks like &lt;kind&gt;" classification — **the response body is
+    never read into storage, logged, or written anywhere.** The point is to tell you that you
+    have leaked something, not to collect it.
+  These run only against the open ports of hosts already in your scan scope.
 - **HTML report**: every run folder also gets a styled, standalone `report.html`
   (summary, rollups, policy findings, full results; light/dark aware). `e` can export one too.
 - **Headless mode**: run a scan with no TUI, straight to a result folder — for cron/CI on
