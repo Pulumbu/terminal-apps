@@ -37,8 +37,13 @@ Keys: `s` scan · `x` stop · `/` filter · `e` export · `i` import · `h` hist
 - **Ports**: tick any combination of categories (Top 100, Web, Databases, Remote admin,
   Mail, Full) — they're **unioned** into one scan — and the custom box adds extra ports on
   top, e.g. `22,80,443,8000-8100`. Untick everything to scan only the custom ports.
-- **Scan**: async TCP connect, bounded concurrency, adaptive backoff, three honest states
-  (open / closed / filtered), optional banner grab, per-environment rate presets, cancellable
+- **Scan**: async **TCP connect** or **UDP** (clearly labelled, slower), bounded concurrency,
+  adaptive backoff, honest states (open / closed / filtered; UDP filtered = open|filtered),
+  per-environment rate presets, cancellable. **IPv6** targets, CIDR and classification are
+  supported end-to-end alongside IPv4.
+- **Service/version hints**: open ports are fingerprinted lightly — TLS version + cipher
+  (+ certificate CN when `cryptography` is installed) on TLS ports, the HTTP `Server` header,
+  and the first banner line otherwise. Reporting only; no exploitation.
 - **Results**: live table with a **filter box** (type text, or a state like `open`), a
   **state-filter dropdown** (All / Open only / Not closed / Open+Filtered), and
   **click-to-sort** column headers. CSV/JSON **export** and **import**, plus a **history**

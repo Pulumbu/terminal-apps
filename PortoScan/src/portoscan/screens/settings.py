@@ -34,6 +34,9 @@ class SettingsScreen(ModalScreen[Settings | None]):
             yield from self._select("rate", "Rate preset",
                                     [(p.label, p.key) for p in PRESETS],
                                     self.settings.rate_preset)
+            yield from self._select("protocol", "Protocol",
+                                    [("TCP connect", "tcp"), ("UDP (slow)", "udp")],
+                                    self.settings.protocol)
             yield from self._select("profile", "Default ports",
                                     [(p.label, p.key) for p in PROFILES],
                                     self.settings.port_profile)
@@ -70,6 +73,7 @@ class SettingsScreen(ModalScreen[Settings | None]):
     def _save(self) -> None:
         self.settings.theme = str(self.query_one("#theme", Select).value)
         self.settings.rate_preset = str(self.query_one("#rate", Select).value)
+        self.settings.protocol = str(self.query_one("#protocol", Select).value)
         self.settings.port_profile = str(self.query_one("#profile", Select).value)
         self.settings.animations = str(self.query_one("#anim", Select).value)
         self.settings.icons = str(self.query_one("#icons", Select).value)

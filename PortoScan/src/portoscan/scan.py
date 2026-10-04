@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import socket
+import ssl
 import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
@@ -42,12 +43,13 @@ PRESETS: tuple[RatePreset, ...] = (
 )
 PRESET_BY_KEY = {preset.key: preset for preset in PRESETS}
 
-_HTTP_PORTS = {80, 591, 8000, 8008, 8080, 8888}
+_HTTP_PORTS = {80, 591, 8000, 8008, 8080, 8888, 5000, 3000}
+_TLS_PORTS = {443, 465, 563, 636, 989, 990, 993, 995, 8443, 9443, 5986}
 
 
-def service_name(port: int) -> str:
+def service_name(port: int, protocol: str = "tcp") -> str:
     try:
-        return socket.getservbyport(port, "tcp")
+        return socket.getservbyport(port, protocol)
     except OSError:
         return ""
 
@@ -78,10 +80,11 @@ class Progress:
 
     def record(self, state: State) -> None:
         self.done += 1
-        setattr(self, state, getattr(self, state) + 1)
+        if hasattr(self, state):
+            setattr(self, state, getattr(self, state) + 1)
 
 
-async def _scan_one(
+async def _scan_tcp(
     host: str, port: int, *, timeout: float, grab: bool
 ) -> Result:
     start = time.perf_counter()
@@ -102,7 +105,7 @@ async def _scan_one(
 
     banner = ""
     if grab:
-        banner = await _grab(reader, writer, port)
+        banner = await _grab(reader, writer, host, port, timeout)
     writer.close()
     with contextlib.suppress(OSError):
         await writer.wait_closed()
@@ -111,18 +114,144 @@ async def _scan_one(
 
 
 async def _grab(reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
-                port: int) -> str:
+                host: str, port: int, timeout: float) -> str:
+    """Return a short service/version hint for an open TCP port."""
+    if port in _TLS_PORTS:
+        return await _tls_probe(host, port, timeout)
     try:
         if port in _HTTP_PORTS:
-            writer.write(b"HEAD / HTTP/1.0\r\n\r\n")
+            writer.write(f"HEAD / HTTP/1.0\r\nHost: {host}\r\n\r\n".encode())
             await writer.drain()
-        data = await asyncio.wait_for(reader.read(256), timeout=0.6)
+        data = await asyncio.wait_for(reader.read(512), timeout=min(0.8, timeout))
     except (asyncio.TimeoutError, OSError):
         return ""
     if not data:
         return ""
-    text = data.decode("utf-8", "replace").strip()
-    return text.splitlines()[0][:200] if text else ""
+    text = data.decode("utf-8", "replace")
+    if port in _HTTP_PORTS:
+        return _http_hint(text)
+    return text.strip().splitlines()[0][:200] if text.strip() else ""
+
+
+def _http_hint(text: str) -> str:
+    server = ""
+    status = ""
+    for line in text.splitlines():
+        low = line.lower()
+        if low.startswith("server:"):
+            server = line.split(":", 1)[1].strip()
+        elif line.startswith("HTTP/") and not status:
+            status = line.strip()
+    if server:
+        return f"HTTP {server}"[:200]
+    return status[:200]
+
+
+async def _tls_probe(host: str, port: int, timeout: float) -> str:
+    """Open a TLS connection and report protocol + cipher (+ cert CN if possible).
+
+    Does NOT validate the certificate -- the point is to fingerprint an unknown
+    service, not to trust it.
+    """
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    try:
+        _reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port, ssl=context,
+                                    server_hostname=host if _is_name(host) else None),
+            timeout=timeout,
+        )
+    except (asyncio.TimeoutError, ssl.SSLError, OSError):
+        return "TLS"
+    parts = ["TLS"]
+    ssl_object = writer.get_extra_info("ssl_object")
+    if ssl_object is not None:
+        version = ssl_object.version()
+        if version:
+            parts.append(version)
+        cipher = ssl_object.cipher()
+        if cipher:
+            parts.append(cipher[0])
+        cn = _cert_cn(ssl_object)
+        if cn:
+            parts.append(f"CN={cn}")
+    writer.close()
+    with contextlib.suppress(OSError, ssl.SSLError):
+        await writer.wait_closed()
+    return " ".join(parts)[:200]
+
+
+def _is_name(host: str) -> bool:
+    try:
+        socket.inet_pton(socket.AF_INET, host)
+        return False
+    except OSError:
+        pass
+    try:
+        socket.inet_pton(socket.AF_INET6, host)
+        return False
+    except OSError:
+        return True
+
+
+def _cert_cn(ssl_object: ssl.SSLObject) -> str:
+    """Best-effort certificate common name, if a parser is available."""
+    try:
+        der = ssl_object.getpeercert(binary_form=True)
+    except (ValueError, ssl.SSLError):
+        return ""
+    if not der:
+        return ""
+    try:
+        from cryptography import x509  # optional dependency
+        from cryptography.x509.oid import NameOID
+        cert = x509.load_der_x509_certificate(der)
+        attrs = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+        return attrs[0].value if attrs else ""
+    except Exception:
+        return ""
+
+
+async def _scan_udp(host: str, port: int, *, timeout: float) -> Result:
+    """A connectionless UDP probe.
+
+    open          -> a datagram came back
+    closed        -> the OS reported ICMP port-unreachable (ConnectionRefused)
+    filtered      -> no response at all (this is nmap's 'open|filtered')
+    """
+    loop = asyncio.get_running_loop()
+    start = time.perf_counter()
+
+    class _Proto(asyncio.DatagramProtocol):
+        def __init__(self) -> None:
+            self.data: bytes | None = None
+            self.error: Exception | None = None
+
+        def datagram_received(self, data: bytes, addr: object) -> None:
+            self.data = data
+
+        def error_received(self, exc: Exception) -> None:
+            self.error = exc
+
+    try:
+        transport, proto = await loop.create_datagram_endpoint(
+            _Proto, remote_addr=(host, port))
+    except OSError as error:
+        return Result(host, port, "error", 0.0, service_name(port, "udp"), str(error)[:80])
+    try:
+        transport.sendto(b"\x00")
+        await asyncio.sleep(timeout)
+    finally:
+        transport.close()
+    latency = (time.perf_counter() - start) * 1000
+    if proto.data is not None:
+        return Result(host, port, "open", latency, service_name(port, "udp"),
+                      proto.data[:60].decode("utf-8", "replace").strip())
+    if isinstance(proto.error, ConnectionRefusedError):
+        return Result(host, port, "closed", latency, service_name(port, "udp"), "")
+    return Result(host, port, "filtered", latency, service_name(port, "udp"),
+                  "open|filtered")
 
 
 async def scan(
@@ -138,6 +267,7 @@ async def scan(
     should_cancel: Callable[[], bool] | None = None,
     adaptive: bool = True,
     pairs: Sequence[tuple[str, int]] | None = None,
+    protocol: str = "tcp",
 ) -> list[Result]:
     """Scan ``hosts`` x ``ports``.
 
@@ -189,7 +319,10 @@ async def scan(
                 return
             if state["delay"]:
                 await asyncio.sleep(state["delay"])
-            result = await _scan_one(host, port, timeout=timeout, grab=grab)
+            if protocol == "udp":
+                result = await _scan_udp(host, port, timeout=timeout)
+            else:
+                result = await _scan_tcp(host, port, timeout=timeout, grab=grab)
         results.append(result)
         progress.record(result.state)
         if adaptive:

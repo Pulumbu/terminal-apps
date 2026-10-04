@@ -44,7 +44,7 @@ async def test_concurrency_never_exceeds_limit():
     lock = asyncio.Lock()
 
     import portoscan.scan as scan_mod
-    original = scan_mod._scan_one
+    original = scan_mod._scan_tcp
 
     async def tracked(host, port, *, timeout, grab):
         nonlocal peak, live
@@ -56,32 +56,32 @@ async def test_concurrency_never_exceeds_limit():
             live -= 1
         return Result(host, port, "closed", 1.0, "", "")
 
-    scan_mod._scan_one = tracked
+    scan_mod._scan_tcp = tracked
     try:
         await scan(["127.0.0.1"], list(range(2000, 2100)), concurrency=10,
                    grab=False, adaptive=False)
     finally:
-        scan_mod._scan_one = original
+        scan_mod._scan_tcp = original
     assert peak <= 10
 
 
 async def test_cancellation_stops_early():
     flag = {"cancel": False}
     import portoscan.scan as scan_mod
-    original = scan_mod._scan_one
+    original = scan_mod._scan_tcp
 
     async def slow(host, port, *, timeout, grab):
         await asyncio.sleep(0.02)
         flag["cancel"] = True  # cancel after the first result returns
         return Result(host, port, "closed", 1.0, "", "")
 
-    scan_mod._scan_one = slow
+    scan_mod._scan_tcp = slow
     try:
         results = await scan(["127.0.0.1"], list(range(3000, 3200)),
                              concurrency=1, grab=False,
                              should_cancel=lambda: flag["cancel"], adaptive=False)
     finally:
-        scan_mod._scan_one = original
+        scan_mod._scan_tcp = original
     assert len(results) < 200
 
 

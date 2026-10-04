@@ -142,6 +142,10 @@ class PortoScan(App[int]):
                 yield Select([(p.label, p.key) for p in PRESETS],
                              value=self.settings.rate_preset, allow_blank=False,
                              id="rate")
+                yield Label("Protocol", classes="section")
+                yield Select([("TCP connect", "tcp"), ("UDP (slow)", "udp")],
+                             value=self.settings.protocol, allow_blank=False,
+                             id="protocol")
                 with HorizontalGroup(id="scan-row"):
                     yield Button("Scan", id="scan", variant="primary")
                     yield Button("Stop", id="stop", variant="error", disabled=True)
@@ -166,7 +170,7 @@ class PortoScan(App[int]):
         if self.settings.theme in self.available_themes:
             self.theme = self.settings.theme
         table = self.query_one("#results", DataTable)
-        table.add_column("Host", key="host", width=20)
+        table.add_column("Host", key="host", width=30)
         table.add_column("Port", key="port", width=7)
         table.add_column("State", key="state", width=10)
         table.add_column("Service", key="service", width=12)
@@ -295,6 +299,7 @@ class PortoScan(App[int]):
         self._results = []
         self._open_series = []
         preset = PRESET_BY_KEY[str(self.query_one("#rate", Select).value)]
+        protocol = str(self.query_one("#protocol", Select).value)
         table = self.query_one("#results", DataTable)
         table.clear()
         meter = self.query_one("#meter", ScanMeter)
@@ -317,9 +322,9 @@ class PortoScan(App[int]):
         results = await scan(
             hosts, ports,
             concurrency=preset.concurrency, timeout=preset.timeout,
-            grab=self.settings.grab_banners,
+            grab=self.settings.grab_banners and protocol == "tcp",
             on_result=on_result, on_progress=on_progress,
-            should_cancel=lambda: self._cancel, pairs=pairs,
+            should_cancel=lambda: self._cancel, pairs=pairs, protocol=protocol,
         )
         self._results = results
         self.scanning = False
@@ -636,6 +641,7 @@ class PortoScan(App[int]):
         profiles.deselect_all()
         profiles.select(updated.port_profile)
         self.query_one("#rate", Select).value = updated.rate_preset
+        self.query_one("#protocol", Select).value = updated.protocol
         self._persist()
         self._refresh_scope()
 

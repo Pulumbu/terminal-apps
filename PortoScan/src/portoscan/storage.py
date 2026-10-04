@@ -46,6 +46,7 @@ class Settings:
     schema_version: int = CURRENT_SCHEMA_VERSION
     theme: str = "midnight"
     rate_preset: str = "lan"
+    protocol: str = "tcp"          # tcp | udp
     port_profile: str = "top100"
     animations: str = "full"       # full | basic | none
     icons: str = "auto"            # auto | unicode | ascii | nerd
