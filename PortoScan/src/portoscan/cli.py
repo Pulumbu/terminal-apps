@@ -21,6 +21,30 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--theme", default=None)
     parser.add_argument("targets", nargs="?",
                         help="a targets .txt file to preload (optional)")
+
+    headless = parser.add_argument_group(
+        "headless scan (no TUI)",
+        "Run a scan from the command line and write a 'PortoScan Result' folder.")
+    headless.add_argument("--scan", action="store_true",
+                          help="run a headless scan instead of the TUI")
+    headless.add_argument("--targets", dest="targets_inline", metavar="LIST",
+                          help="inline targets (IPs/hosts/CIDR/ranges, space/comma/newline)")
+    headless.add_argument("--profile", metavar="KEYS",
+                          help="port profile(s): top100,web,db,admin,mail,full")
+    headless.add_argument("--ports", metavar="SPEC",
+                          help="custom ports, e.g. 22,80,443,8000-8100")
+    headless.add_argument("--rate", default="lan",
+                          choices=["localhost", "lan", "internet"])
+    headless.add_argument("--udp", action="store_true", help="UDP scan")
+    headless.add_argument("--no-grab", action="store_true", help="skip banner grab")
+    headless.add_argument("--no-resolve", action="store_true",
+                          help="do not pre-resolve hostnames")
+    headless.add_argument("--out", metavar="DIR",
+                          help="base directory for the result folder")
+    headless.add_argument("--format", default="txt", choices=["txt", "csv", "json"],
+                          help="split-file format (report.html is always written)")
+    headless.add_argument("--authorize", action="store_true",
+                          help="confirm you are authorized to scan public addresses")
     return parser
 
 
@@ -42,6 +66,15 @@ def main(argv: list[str] | None = None) -> int:
         for name in ("config", "data", "cache", "state", "logs"):
             print(f"{name:7}: {getattr(paths, name)}")
         return 0
+
+    if args.scan or args.targets_inline or args.profile or args.ports:
+        from portoscan import headless
+        ns = argparse.Namespace(
+            targets_file=args.targets, targets=args.targets_inline,
+            profile=args.profile, ports=args.ports, rate=args.rate, udp=args.udp,
+            no_grab=args.no_grab, no_resolve=args.no_resolve, out=args.out,
+            format=args.format, authorize=args.authorize)
+        return headless.run(ns, paths)
 
     targets = ""
     if args.targets:

@@ -28,8 +28,8 @@ portoscan --version
 ```
 
 Keys: `s` scan · `x` stop · `/` filter · `e` export · `i` import · `h` history ·
-`d` diff · `r` re-scan open · `ctrl+r` re-scan host · `t` stats · `ctrl+s` save preset ·
-`ctrl+l` presets · `,` settings · `ctrl+t` theme · `ctrl+p` command palette · `ctrl+q` quit.
+`d` diff · `r` re-scan open · `ctrl+r` re-scan host · `t` stats · `c` policy check ·
+`ctrl+s` save preset · `ctrl+l` presets · `,` settings · `ctrl+t` theme · `ctrl+q` quit.
 
 ## What it does
 
@@ -60,6 +60,16 @@ Keys: `s` scan · `x` stop · `/` filter · `e` export · `i` import · `h` hist
   `ctrl+r` re-scans the highlighted row's host across the current port selection.
 - **Live stats panel** (`t`): open-ports sparkline over time, by-state counts, a top-services
   histogram and the top hosts by open-port count — updating as the scan runs.
+- **Policy / compliance check** (`c`): a rules pass flags open ports that expose risky or
+  legacy services (Telnet, FTP, SMB, RDP, VNC, exposed databases, …) with severities.
+- **HTML report**: every run folder also gets a styled, standalone `report.html`
+  (summary, rollups, policy findings, full results; light/dark aware). `e` can export one too.
+- **Headless mode**: run a scan with no TUI, straight to a result folder — for cron/CI on
+  your own hosts:
+  ```bash
+  portoscan --scan --targets 10.0.0.0/24 --profile web,db --rate lan --out ./scans
+  portoscan --scan --targets 203.0.113.0/28 --ports 1-1000 --authorize   # public needs --authorize
+  ```
 - **Auto-save**: every run creates `PortoScan Result/<timestamp>/` in the launch directory
   (falling back to Documents, then app-data, if that is not writable) containing
   `open`, `closed`, `filtered`, `all` and `summary` files. Default format is **txt**;

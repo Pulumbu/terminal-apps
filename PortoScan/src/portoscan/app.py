@@ -32,14 +32,17 @@ from textual.widgets.selection_list import Selection
 
 from portoscan import export, results_io
 from portoscan.authorization import classify
+from portoscan.compliance import check as compliance_check
 from portoscan.diff import diff_scans
 from portoscan.icons import glyphs
 from portoscan.paths import Paths, resource_path
 from portoscan.ports import PROFILE_BY_KEY, PROFILES, parse_ports
+from portoscan.report import render_report
 from portoscan.resolve import resolve_all
 from portoscan.scan import PRESET_BY_KEY, PRESETS, Progress, Result, scan
 from portoscan.screens import (
     AuthorizeScreen,
+    ComplianceScreen,
     Confirm,
     DiffScreen,
     HistoryScreen,
@@ -97,6 +100,7 @@ class PortoScan(App[int]):
         Binding("r", "rescan_open", "Re-scan open", id="rescan-open"),
         Binding("ctrl+r", "rescan_host", "Re-scan host", id="rescan-host"),
         Binding("t", "toggle_stats", "Stats", id="stats"),
+        Binding("c", "compliance", "Policy", id="compliance"),
         Binding("ctrl+s", "save_preset", "Save preset", id="save-preset"),
         Binding("ctrl+l", "load_preset", "Presets", id="load-preset"),
         Binding("comma", "settings", "Settings", id="settings"),
@@ -108,7 +112,7 @@ class PortoScan(App[int]):
     Scan only systems you own or are authorized to test.
     - `s` scan, `x` stop, `/` filter results, click a header to sort
     - `e` export, `i` import, `h` history, `d` diff two scans
-    - `r` re-scan open, `ctrl+r` re-scan highlighted host, `t` stats panel
+    - `r` re-scan open, `ctrl+r` re-scan host, `t` stats, `c` policy check
     - `ctrl+s` save preset, `ctrl+l` presets, `,` settings, `ctrl+t` theme
     """
 
@@ -628,6 +632,14 @@ class PortoScan(App[int]):
             self.query_one("#rate", Select).value = rate
         self._refresh_scope()
 
+    # ------------------------------------------------------------- compliance
+    @work
+    async def action_compliance(self) -> None:
+        if not self._results:
+            self.notify("Run or load a scan first", severity="warning")
+            return
+        await self.push_screen_wait(ComplianceScreen(compliance_check(self._results)))
+
     # ---------------------------------------------------------------- export
     @work
     async def action_export(self) -> None:
@@ -639,12 +651,20 @@ class PortoScan(App[int]):
         from portoscan import export
 
         path = await self.push_screen_wait(
-            FileSave(Path.cwd(), default_file="portoscan-results.csv"))
+            FileSave(Path.cwd(), default_file="portoscan-report.html"))
         if path is None:
             return
         target = Path(path)
-        text = export.to_json(self._results) if target.suffix.lower() == ".json" \
-            else export.to_csv(self._results)
+        suffix = target.suffix.lower()
+        if suffix == ".json":
+            text = export.to_json(self._results)
+        elif suffix in (".txt", ".tsv"):
+            text = "\n".join(f"{r.host}:{r.port}\t{r.state}\t{r.service}\t{r.banner}"
+                              for r in self._results) + "\n"
+        elif suffix in (".html", ".htm"):
+            text = render_report(self._results, scope=f"{len(self._results)} results")
+        else:
+            text = export.to_csv(self._results)
         try:
             target.write_text(text, encoding="utf-8")
         except OSError as error:

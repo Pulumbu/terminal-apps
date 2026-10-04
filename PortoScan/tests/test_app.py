@@ -385,3 +385,21 @@ async def test_scan_resolves_hostname_before_scanning():
         # the hostname was resolved to a loopback literal before scanning
         assert app._results and app._results[0].host in ("127.0.0.1", "::1")
         assert app._results[0].state in ("open", "closed")
+
+
+async def test_compliance_screen_lists_findings():
+    from portoscan.scan import Result
+    from portoscan.screens import ComplianceScreen
+    app = PortoScan()
+    app.settings.authorized_ack = True
+    async with app.run_test(size=(120, 36)) as pilot:
+        await pilot.pause(0.2)
+        app._results = [
+            Result("10.0.0.1", 23, "open", 1.0, "telnet", ""),
+            Result("10.0.0.1", 443, "open", 1.0, "https", ""),
+        ]
+        app.action_compliance()
+        await pilot.pause(0.3)
+        assert isinstance(app.screen, ComplianceScreen)
+        assert len(app.screen.findings) == 1   # only telnet flagged
+        assert app.screen.findings[0].port == 23

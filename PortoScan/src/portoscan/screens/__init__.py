@@ -1,4 +1,5 @@
 from portoscan.screens.authorize import AuthorizeScreen
+from portoscan.screens.compliance import ComplianceScreen
 from portoscan.screens.confirm import Confirm
 from portoscan.screens.diff import DiffScreen
 from portoscan.screens.history import HistoryScreen
@@ -7,6 +8,6 @@ from portoscan.screens.prompt import PromptScreen
 from portoscan.screens.settings import SettingsScreen
 
 __all__ = [
-    "AuthorizeScreen", "Confirm", "DiffScreen", "HistoryScreen",
-    "PresetsScreen", "PromptScreen", "SettingsScreen",
+    "AuthorizeScreen", "ComplianceScreen", "Confirm", "DiffScreen",
+    "HistoryScreen", "PresetsScreen", "PromptScreen", "SettingsScreen",
 ]

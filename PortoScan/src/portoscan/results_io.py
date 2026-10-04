@@ -20,6 +20,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from portoscan import export
+from portoscan.compliance import check as compliance_check
+from portoscan.compliance import summarize as compliance_summary
+from portoscan.report import render_report
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -137,5 +140,17 @@ def write_run(
     summary_path = folder / "summary.txt"
     summary_path.write_text(_summary(results, scope, when), encoding="utf-8")
     written.append(summary_path)
+
+    findings = compliance_check(results)
+    compliance_path = folder / "compliance.txt"
+    lines = [compliance_summary(findings), ""]
+    lines += [f"[{f.severity}] {f.message}" for f in findings]
+    compliance_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    written.append(compliance_path)
+
+    report_path = folder / "report.html"
+    report_path.write_text(render_report(results, scope=scope, when=when),
+                           encoding="utf-8")
+    written.append(report_path)
 
     return RunOutput(folder=folder, files=written)
