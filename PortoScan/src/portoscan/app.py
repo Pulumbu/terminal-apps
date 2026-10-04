@@ -45,10 +45,11 @@ from portoscan.screens import (
     PromptScreen,
     SettingsScreen,
 )
+from portoscan.stats import open_pairs
 from portoscan.storage import Settings, load_scan, recent_scans, save_scan
 from portoscan.targets import expand
 from portoscan.themes import ALL_THEMES
-from portoscan.widgets import ScanMeter, ScopeBanner
+from portoscan.widgets import ScanMeter, ScopeBanner, StatsPanel
 
 log = logging.getLogger(__name__)
 STATE_ORDER = {"open": 0, "filtered": 1, "error": 2, "closed": 3}
@@ -82,6 +83,9 @@ class PortoScan(App[int]):
         Binding("i", "import_results", "Import", id="import"),
         Binding("h", "history", "History", id="history"),
         Binding("d", "diff", "Diff", id="diff"),
+        Binding("r", "rescan_open", "Re-scan open", id="rescan-open"),
+        Binding("ctrl+r", "rescan_host", "Re-scan host", id="rescan-host"),
+        Binding("t", "toggle_stats", "Stats", id="stats"),
         Binding("ctrl+s", "save_preset", "Save preset", id="save-preset"),
         Binding("ctrl+l", "load_preset", "Presets", id="load-preset"),
         Binding("comma", "settings", "Settings", id="settings"),
@@ -93,6 +97,7 @@ class PortoScan(App[int]):
     Scan only systems you own or are authorized to test.
     - `s` scan, `x` stop, `/` filter results, click a header to sort
     - `e` export, `i` import, `h` history, `d` diff two scans
+    - `r` re-scan open, `ctrl+r` re-scan highlighted host, `t` stats panel
     - `ctrl+s` save preset, `ctrl+l` presets, `,` settings, `ctrl+t` theme
     """
 
@@ -110,6 +115,7 @@ class PortoScan(App[int]):
         self._sort_col: str | None = None
         self._sort_reverse = False
         self._visible_states = STATE_FILTERS["all"]
+        self._open_series: list[int] = []
 
     # ---------------------------------------------------------------- compose
     def compose(self) -> ComposeResult:
@@ -148,6 +154,7 @@ class PortoScan(App[int]):
                          ("Not closed", "notclosed"), ("Open+Filtered", "openfiltered")],
                         value="all", allow_blank=False, id="state-filter")
                 yield DataTable(id="results", cursor_type="row", zebra_stripes=True)
+            yield StatsPanel(id="stats")
         with HorizontalGroup(id="statusbar"):
             yield Label("idle", id="status")
             yield ScanMeter(id="meter")
@@ -281,15 +288,18 @@ class PortoScan(App[int]):
         self._run_scan(parsed.hosts, ports)
 
     @work(exclusive=True, group="scan")
-    async def _run_scan(self, hosts: list[str], ports: list[int]) -> None:
+    async def _run_scan(self, hosts: list[str], ports: list[int], *,
+                        pairs: list[tuple[str, int]] | None = None) -> None:
         self._cancel = False
         self.scanning = True
         self._results = []
+        self._open_series = []
         preset = PRESET_BY_KEY[str(self.query_one("#rate", Select).value)]
         table = self.query_one("#results", DataTable)
         table.clear()
         meter = self.query_one("#meter", ScanMeter)
         status = self.query_one("#status", Label)
+        stats = self.query_one("#stats", StatsPanel)
 
         def on_result(result: Result, progress: Progress) -> None:
             self._add_row(table, result)
@@ -299,21 +309,29 @@ class PortoScan(App[int]):
             status.update(f"{progress.done}/{progress.total}  "
                           f"{progress.open} open  {progress.rate:.0f}/s  "
                           f"ETA {progress.eta:.0f}s")
+            self._open_series.append(progress.open)
+            if len(self._open_series) > 120:
+                self._open_series = self._open_series[-120:]
+            stats.set_series(self._open_series)
 
         results = await scan(
             hosts, ports,
             concurrency=preset.concurrency, timeout=preset.timeout,
             grab=self.settings.grab_banners,
             on_result=on_result, on_progress=on_progress,
-            should_cancel=lambda: self._cancel,
+            should_cancel=lambda: self._cancel, pairs=pairs,
         )
         self._results = results
         self.scanning = False
         opened = sum(1 for r in results if r.state == "open")
-        scope = f"{len(hosts)} hosts x {len(ports)} ports"
+        host_n = len({h for h, _ in pairs}) if pairs is not None else len(hosts)
+        port_n = len({p for _, p in pairs}) if pairs is not None else len(ports)
+        scope = f"{host_n} hosts x {port_n} ports"
         status.update(f"done: {len(results)} scanned, {opened} open"
                       + (" (stopped)" if self._cancel else ""))
-        self._persist_history(hosts, ports, results)
+        self._update_stats()
+        self._persist_history([*{h for h, _ in pairs}] if pairs else hosts,
+                              list(range(port_n)) if pairs else ports, results)
         if self.settings.auto_save and results:
             self._auto_save(results, scope)
 
@@ -360,6 +378,62 @@ class PortoScan(App[int]):
             self.query_one("#status", Label).update(
                 f"{shown}/{len(self._results)} shown"
                 + (f"  (filter: {self._filter_text})" if self._filter_text else ""))
+        self._update_stats()
+
+    def _update_stats(self) -> None:
+        try:
+            stats = self.query_one("#stats", StatsPanel)
+        except Exception:  # panel not mounted yet
+            return
+        stats.set_rollups(self._results)
+        if not self.scanning:
+            opened = sum(1 for r in self._results if r.state == "open")
+            stats.set_series(self._open_series or [opened])
+
+    def action_toggle_stats(self) -> None:
+        panel = self.query_one("#stats", StatsPanel)
+        panel.toggle_class("-show")
+        if panel.has_class("-show"):
+            self._update_stats()
+
+    def _highlighted_host(self) -> str | None:
+        table = self.query_one("#results", DataTable)
+        if table.row_count == 0 or table.cursor_row is None:
+            return None
+        try:
+            return str(table.get_row_at(table.cursor_row)[0])
+        except Exception:
+            return None
+
+    def action_rescan_open(self) -> None:
+        if self.scanning:
+            return
+        pairs = open_pairs(self._results)
+        if not pairs:
+            self.notify("No open ports to re-scan", severity="warning")
+            return
+        hosts = sorted({h for h, _ in pairs})
+        ports = sorted({p for _, p in pairs})
+        self.notify(f"Re-scanning {len(pairs)} open endpoint(s)")
+        self._run_scan(hosts, ports, pairs=pairs)
+
+    def action_rescan_host(self) -> None:
+        if self.scanning:
+            return
+        host = self._highlighted_host()
+        if host is None:
+            self.notify("Highlight a result row first", severity="warning")
+            return
+        try:
+            ports = self._selected_ports()
+        except ValueError as error:
+            self.notify(f"Bad port spec: {error}", severity="error")
+            return
+        if not ports:
+            self.notify("No ports selected", severity="warning")
+            return
+        self.notify(f"Re-scanning {host} x {len(ports)} ports")
+        self._run_scan([host], ports)
 
     @on(Input.Changed, "#filter")
     def _filter_changed(self, event: Input.Changed) -> None:

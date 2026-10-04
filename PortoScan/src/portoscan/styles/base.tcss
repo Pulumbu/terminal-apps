@@ -19,6 +19,9 @@ Screen { layers: base overlay; background: $background; }
 #results-tools #state-filter { width: 22; }
 #results { height: 1fr; }
 
+#stats { display: none; }
+#stats.-show { display: block; }
+
 #results > .datatable--header { background: $primary-muted; text-style: bold; }
 #results > .datatable--cursor { background: $primary 40%; text-style: bold; }
 
@@ -41,5 +44,6 @@ Screen { layers: base overlay; background: $background; }
 #new-row { background: $primary 25%; }
 
 Screen.-narrow #targets { display: none; }
+Screen.-narrow #stats { display: none; }
 
 Screen:nocolor #results > .datatable--cursor { text-style: reverse bold; }

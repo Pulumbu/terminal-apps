@@ -137,6 +137,7 @@ async def scan(
     on_progress: Callable[[Progress], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
     adaptive: bool = True,
+    pairs: Sequence[tuple[str, int]] | None = None,
 ) -> list[Result]:
     """Scan ``hosts`` x ``ports``.
 
@@ -149,8 +150,15 @@ async def scan(
 
     ``adaptive`` applies nmap-style backoff: when the recent filtered-rate climbs
     the effective concurrency is cut, and it recovers when things clear up.
+
+    ``pairs`` scans an explicit list of (host, port) tuples instead of the
+    ``hosts`` x ``ports`` cross product -- used by "re-scan open" to re-check
+    exactly the endpoints that were open.
     """
-    progress = Progress(total=len(hosts) * len(ports))
+    scan_pairs = list(pairs) if pairs is not None else [
+        (host, port) for host in hosts for port in ports
+    ]
+    progress = Progress(total=len(scan_pairs))
     results: list[Result] = []
     sem = asyncio.Semaphore(max(1, concurrency))
 
@@ -191,11 +199,7 @@ async def scan(
         if on_progress is not None:
             on_progress(progress)
 
-    tasks = [
-        asyncio.create_task(run(host, port))
-        for host in hosts
-        for port in ports
-    ]
+    tasks = [asyncio.create_task(run(host, port)) for host, port in scan_pairs]
     try:
         for coro in asyncio.as_completed(tasks):
             await coro

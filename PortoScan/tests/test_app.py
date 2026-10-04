@@ -294,3 +294,63 @@ async def test_diff_action_shows_screen():
         await pilot.press("down", "enter")  # pick the other
         await pilot.pause(0.2)
         assert isinstance(app.screen, DiffScreen)
+
+
+async def test_stats_panel_toggle_and_rollups():
+    from portoscan.scan import Result
+    app = PortoScan()
+    app.settings.authorized_ack = True
+    async with app.run_test(size=(140, 36)) as pilot:
+        await pilot.pause(0.2)
+        stats = app.screen.query_one("#stats")
+        assert not stats.has_class("-show")          # hidden by default
+        app.action_toggle_stats()
+        await pilot.pause(0.1)
+        assert stats.has_class("-show")
+        app._results = [
+            Result("10.0.0.1", 22, "open", 1.0, "ssh", ""),
+            Result("10.0.0.1", 80, "open", 1.0, "http", ""),
+            Result("10.0.0.2", 443, "closed", 1.0, "https", ""),
+        ]
+        app._rerender()
+        from textual.widgets import Static
+        services = str(app.screen.query_one("#stats-services", Static).content)
+        assert "ssh" in services and "http" in services
+
+
+async def test_rescan_open_rescans_only_open_pairs():
+    import asyncio
+
+    from textual.widgets import Select, SelectionList, TextArea
+
+    async def handle(reader, writer):
+        writer.close()
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    open_port = server.sockets[0].getsockname()[1]
+    closed_port = open_port + 1
+
+    app = PortoScan()
+    app.settings.authorized_ack = True
+    app.settings.auto_save = False
+    async with server, app.run_test(size=(120, 36)) as pilot:
+        await pilot.pause(0.2)
+        app.screen.query_one("#profiles", SelectionList).deselect_all()
+        app.screen.query_one("#target-input", TextArea).text = "127.0.0.1"
+        app.screen.query_one("#port-spec", TextArea).text = f"{open_port},{closed_port}"
+        app.screen.query_one("#rate", Select).value = "localhost"
+        await pilot.pause(0.1)
+        app.action_scan()
+        for _ in range(100):
+            await pilot.pause(0.05)
+            if not app.scanning and app._results:
+                break
+        assert len(app._results) == 2
+        # now re-scan open: should scan exactly the 1 open endpoint
+        app.action_rescan_open()
+        for _ in range(100):
+            await pilot.pause(0.05)
+            if not app.scanning and app._results:
+                break
+        assert len(app._results) == 1
+        assert app._results[0].state == "open"
+        assert app._results[0].port == open_port

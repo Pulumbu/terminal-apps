@@ -28,8 +28,8 @@ portoscan --version
 ```
 
 Keys: `s` scan · `x` stop · `/` filter · `e` export · `i` import · `h` history ·
-`d` diff two scans · `ctrl+s` save preset · `ctrl+l` presets · `,` settings ·
-`ctrl+t` theme · `ctrl+p` command palette · `F1` help · `ctrl+q` quit.
+`d` diff · `r` re-scan open · `ctrl+r` re-scan host · `t` stats · `ctrl+s` save preset ·
+`ctrl+l` presets · `,` settings · `ctrl+t` theme · `ctrl+p` command palette · `ctrl+q` quit.
 
 ## What it does
 
@@ -47,6 +47,10 @@ Keys: `s` scan · `x` stop · `/` filter · `e` export · `i` import · `h` hist
   monitoring for your own infrastructure (`d`).
 - **Presets**: save a (targets + categories + custom ports + rate) combo by name and reload
   it later (`ctrl+s` to save, `ctrl+l` to pick/delete).
+- **Re-scan**: `r` re-scans only the endpoints that were open (a fast verification pass);
+  `ctrl+r` re-scans the highlighted row's host across the current port selection.
+- **Live stats panel** (`t`): open-ports sparkline over time, by-state counts, a top-services
+  histogram and the top hosts by open-port count — updating as the scan runs.
 - **Auto-save**: every run creates `PortoScan Result/<timestamp>/` in the launch directory
   (falling back to Documents, then app-data, if that is not writable) containing
   `open`, `closed`, `filtered`, `all` and `summary` files. Default format is **txt**;
