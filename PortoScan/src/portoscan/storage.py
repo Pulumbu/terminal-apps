@@ -51,6 +51,7 @@ class Settings:
     animations: str = "full"       # full | basic | none
     icons: str = "auto"            # auto | unicode | ascii | nerd
     grab_banners: bool = True
+    resolve_first: bool = True
     authorized_ack: bool = False
     auto_save: bool = True
     output_format: str = "txt"     # txt | csv | json

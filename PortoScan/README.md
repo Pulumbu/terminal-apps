@@ -37,10 +37,14 @@ Keys: `s` scan · `x` stop · `/` filter · `e` export · `i` import · `h` hist
 - **Ports**: tick any combination of categories (Top 100, Web, Databases, Remote admin,
   Mail, Full) — they're **unioned** into one scan — and the custom box adds extra ports on
   top, e.g. `22,80,443,8000-8100`. Untick everything to scan only the custom ports.
-- **Scan**: async **TCP connect** or **UDP** (clearly labelled, slower), bounded concurrency,
-  adaptive backoff, honest states (open / closed / filtered; UDP filtered = open|filtered),
-  per-environment rate presets, cancellable. **IPv6** targets, CIDR and classification are
-  supported end-to-end alongside IPv4.
+- **Scan**: async **TCP connect** or **UDP** (clearly labelled, slower), with
+  **auto-tuned concurrency** — a deadlock-free gate lowers the live connection limit when the
+  filtered-rate climbs (polite, fewer false negatives) and raises it back toward the ceiling
+  when it clears; the status bar shows live rate, `inflight / limit`, and ETA. Honest states
+  (open / closed / filtered; UDP filtered = open|filtered), per-environment rate presets,
+  cancellable. **IPv6** targets, CIDR and classification are supported end-to-end alongside IPv4.
+- **Hostname pre-resolution**: before scanning, names are resolved on a worker thread, ones
+  that fail are reported, and targets are de-duplicated by resolved IP (toggle in Settings).
 - **Service/version hints**: open ports are fingerprinted lightly — TLS version + cipher
   (+ certificate CN when `cryptography` is installed) on TLS ports, the HTTP `Server` header,
   and the first banner line otherwise. Reporting only; no exploitation.

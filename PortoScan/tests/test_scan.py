@@ -104,3 +104,43 @@ def test_export_round_trips():
     import json
     rows = json.loads(to_json(results))
     assert rows[0]["port"] == 80 and rows[0]["state"] == "open"
+
+
+async def test_autotune_lowers_concurrency_under_high_filtered_rate():
+    import asyncio
+
+    import portoscan.scan as scan_mod
+    from portoscan.scan import Result, scan
+
+    original = scan_mod._scan_tcp
+
+    async def all_filtered(host, port, *, timeout, grab):
+        await asyncio.sleep(0)
+        return Result(host, port, "filtered", 1.0, "", "")
+
+    scan_mod._scan_tcp = all_filtered
+    seen_min = [10_000]
+
+    def on_progress(progress):
+        seen_min[0] = min(seen_min[0], progress.concurrency)
+
+    try:
+        await scan(["127.0.0.1"], list(range(1, 301)), concurrency=100,
+                   grab=False, adaptive=True, on_progress=on_progress)
+    finally:
+        scan_mod._scan_tcp = original
+    assert seen_min[0] < 100  # auto-tune backed the limit off
+
+
+async def test_progress_exposes_inflight_and_concurrency():
+    from portoscan.scan import scan
+    captured = {}
+
+    def on_progress(progress):
+        captured["concurrency"] = progress.concurrency
+        captured["inflight"] = progress.inflight
+
+    await scan(["127.0.0.1"], [40000, 40001], concurrency=50, grab=False,
+               adaptive=False, on_progress=on_progress)
+    assert captured["concurrency"] == 50
+    assert captured["inflight"] >= 0

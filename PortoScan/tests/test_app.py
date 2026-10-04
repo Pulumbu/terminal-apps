@@ -354,3 +354,34 @@ async def test_rescan_open_rescans_only_open_pairs():
         assert len(app._results) == 1
         assert app._results[0].state == "open"
         assert app._results[0].port == open_port
+
+
+async def test_scan_resolves_hostname_before_scanning():
+    import asyncio
+
+    from textual.widgets import Select, SelectionList, TextArea
+
+    async def handler(reader, writer):
+        writer.close()
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+
+    app = PortoScan()
+    app.settings.authorized_ack = True
+    app.settings.auto_save = False
+    app.settings.resolve_first = True
+    async with server, app.run_test(size=(120, 36)) as pilot:
+        await pilot.pause(0.2)
+        app.screen.query_one("#profiles", SelectionList).deselect_all()
+        app.screen.query_one("#target-input", TextArea).text = "localhost"
+        app.screen.query_one("#port-spec", TextArea).text = str(port)
+        app.screen.query_one("#rate", Select).value = "localhost"
+        await pilot.pause(0.1)
+        app.action_scan()
+        for _ in range(100):
+            await pilot.pause(0.05)
+            if not app.scanning and app._results:
+                break
+        # the hostname was resolved to a loopback literal before scanning
+        assert app._results and app._results[0].host in ("127.0.0.1", "::1")
+        assert app._results[0].state in ("open", "closed")

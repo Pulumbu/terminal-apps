@@ -50,6 +50,9 @@ class SettingsScreen(ModalScreen[Settings | None]):
                 yield Label("Grab banners")
                 yield Switch(self.settings.grab_banners, id="grab")
             with HorizontalGroup(classes="row"):
+                yield Label("Resolve names first")
+                yield Switch(self.settings.resolve_first, id="resolve")
+            with HorizontalGroup(classes="row"):
                 yield Label("Auto-save results")
                 yield Switch(self.settings.auto_save, id="autosave")
             yield from self._select("fmt", "Output format",
@@ -78,6 +81,7 @@ class SettingsScreen(ModalScreen[Settings | None]):
         self.settings.animations = str(self.query_one("#anim", Select).value)
         self.settings.icons = str(self.query_one("#icons", Select).value)
         self.settings.grab_banners = self.query_one("#grab", Switch).value
+        self.settings.resolve_first = self.query_one("#resolve", Switch).value
         self.settings.auto_save = self.query_one("#autosave", Switch).value
         self.settings.output_format = str(self.query_one("#fmt", Select).value)
         self.settings.auto_save_dir = self.query_one("#savedir", Input).value.strip()

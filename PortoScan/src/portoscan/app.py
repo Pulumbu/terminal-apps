@@ -7,6 +7,7 @@ own). It has no random or by-country public-IP target generation by design.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -35,6 +36,7 @@ from portoscan.diff import diff_scans
 from portoscan.icons import glyphs
 from portoscan.paths import Paths, resource_path
 from portoscan.ports import PROFILE_BY_KEY, PROFILES, parse_ports
+from portoscan.resolve import resolve_all
 from portoscan.scan import PRESET_BY_KEY, PRESETS, Progress, Result, scan
 from portoscan.screens import (
     AuthorizeScreen,
@@ -53,6 +55,15 @@ from portoscan.widgets import ScanMeter, ScopeBanner, StatsPanel
 
 log = logging.getLogger(__name__)
 STATE_ORDER = {"open": 0, "filtered": 1, "error": 2, "closed": 3}
+
+
+def _is_ip(token: str) -> bool:
+    import ipaddress
+    try:
+        ipaddress.ip_address(token)
+        return True
+    except ValueError:
+        return False
 
 SORT_KEYS = {
     "host": lambda r: (r.host, r.port),
@@ -283,13 +294,26 @@ class PortoScan(App[int]):
         if not ports:
             self.notify("No ports selected", severity="warning")
             return
+        hosts = parsed.hosts
+        if self.settings.resolve_first and any(not _is_ip(h) for h in hosts):
+            report = await asyncio.to_thread(resolve_all, hosts)
+            if report.failed:
+                self.notify(f"{len(report.failed)} name(s) did not resolve: "
+                            + ", ".join(report.failed[:5]), severity="warning")
+            if report.resolved:
+                self.notify(f"Resolved {len(report.resolved)} name(s) -> "
+                            f"{len(report.ips)} unique address(es)")
+            hosts = report.ips
+            if not hosts:
+                self.notify("No targets resolved", severity="error")
+                return
         warns = any(PROFILE_BY_KEY[k].warn for k in self._ticked_profiles())
         if (warns or len(ports) > 10000) and not await self.push_screen_wait(
-            Confirm(f"This scans {len(parsed.hosts)} host(s) x {len(ports)} ports "
-                    f"= {len(parsed.hosts) * len(ports)} connections. Continue?", ok="Scan")
+            Confirm(f"This scans {len(hosts)} host(s) x {len(ports)} ports "
+                    f"= {len(hosts) * len(ports)} connections. Continue?", ok="Scan")
         ):
             return
-        self._run_scan(parsed.hosts, ports)
+        self._run_scan(hosts, ports)
 
     @work(exclusive=True, group="scan")
     async def _run_scan(self, hosts: list[str], ports: list[int], *,
@@ -311,9 +335,10 @@ class PortoScan(App[int]):
 
         def on_progress(progress: Progress) -> None:
             meter.fraction = progress.done / progress.total if progress.total else 0
-            status.update(f"{progress.done}/{progress.total}  "
-                          f"{progress.open} open  {progress.rate:.0f}/s  "
-                          f"ETA {progress.eta:.0f}s")
+            status.update(
+                f"{progress.done}/{progress.total}  {progress.open} open  "
+                f"{progress.rate:.0f}/s  inflight {progress.inflight}/"
+                f"{progress.concurrency}  ETA {progress.eta:.0f}s")
             self._open_series.append(progress.open)
             if len(self._open_series) > 120:
                 self._open_series = self._open_series[-120:]

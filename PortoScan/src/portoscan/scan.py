@@ -62,6 +62,8 @@ class Progress:
     closed: int = 0
     filtered: int = 0
     errors: int = 0
+    inflight: int = 0           # connections in progress right now
+    concurrency: int = 0        # current auto-tuned limit
     started: float = field(default_factory=time.monotonic)
 
     @property
@@ -288,45 +290,60 @@ async def scan(
     scan_pairs = list(pairs) if pairs is not None else [
         (host, port) for host in hosts for port in ports
     ]
-    progress = Progress(total=len(scan_pairs))
+    ceiling = max(1, concurrency)
+    progress = Progress(total=len(scan_pairs), concurrency=ceiling)
     results: list[Result] = []
-    sem = asyncio.Semaphore(max(1, concurrency))
+    delay = (1.0 / rate) if rate > 0 else 0.0
 
-    # Adaptive backoff adjusts the inter-connection delay rather than resizing
-    # the semaphore: when the recent filtered-rate climbs we slow down (be
-    # polite / avoid false negatives), and speed back up when it clears. This
-    # cannot deadlock -- unlike dynamically shrinking a semaphore.
-    base_delay = (1.0 / rate) if rate > 0 else 0.0
-    state = {"delay": base_delay}
+    # Deadlock-free dynamic concurrency: a Condition gate admits a worker only
+    # while `inflight < target`. Auto-tune lowers `target` when the recent
+    # filtered-rate climbs (be polite, avoid false negatives) and raises it back
+    # toward the ceiling when things clear up. `target` is surfaced live as
+    # Progress.concurrency so the UI can show it.
+    cond = asyncio.Condition()
+    gate = {"target": ceiling, "inflight": 0}
     window: list[bool] = []
 
-    def adjust(was_filtered: bool) -> None:
+    async def adjust(was_filtered: bool) -> None:
         window.append(was_filtered)
-        if len(window) < 50:
+        if len(window) < 40:
             return
         filtered_rate = sum(window) / len(window)
         window.clear()
-        if filtered_rate > 0.5:
-            state["delay"] = min(max(state["delay"] * 2, 0.01), 0.5)
-        elif filtered_rate < 0.1:
-            state["delay"] = base_delay if state["delay"] <= 0.01 else state["delay"] / 2
+        async with cond:
+            if adaptive and filtered_rate > 0.5:
+                gate["target"] = max(1, gate["target"] // 2)
+            elif adaptive and filtered_rate < 0.1 and gate["target"] < ceiling:
+                gate["target"] = min(ceiling, gate["target"] + max(1, ceiling // 10))
+            progress.concurrency = gate["target"]
+            cond.notify_all()
 
     async def run(host: str, port: int) -> None:
         if should_cancel is not None and should_cancel():
             return
-        async with sem:
+        async with cond:
+            await cond.wait_for(
+                lambda: gate["inflight"] < gate["target"]
+                or (should_cancel is not None and should_cancel()))
             if should_cancel is not None and should_cancel():
                 return
-            if state["delay"]:
-                await asyncio.sleep(state["delay"])
+            gate["inflight"] += 1
+            progress.inflight = gate["inflight"]
+        try:
+            if delay:
+                await asyncio.sleep(delay)
             if protocol == "udp":
                 result = await _scan_udp(host, port, timeout=timeout)
             else:
                 result = await _scan_tcp(host, port, timeout=timeout, grab=grab)
+        finally:
+            async with cond:
+                gate["inflight"] -= 1
+                progress.inflight = gate["inflight"]
+                cond.notify(1)
         results.append(result)
         progress.record(result.state)
-        if adaptive:
-            adjust(result.state == "filtered")
+        await adjust(result.state == "filtered")
         if on_result is not None:
             on_result(result, progress)
         if on_progress is not None:
