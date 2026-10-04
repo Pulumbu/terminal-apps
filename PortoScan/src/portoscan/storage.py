@@ -53,6 +53,7 @@ class Settings:
     grab_banners: bool = True
     resolve_first: bool = True
     authorized_ack: bool = False
+    deep_authorized_ack: bool = False
     auto_save: bool = True
     output_format: str = "txt"     # txt | csv | json
     auto_save_dir: str = ""        # "" -> current working directory

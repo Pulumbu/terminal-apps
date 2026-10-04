@@ -47,6 +47,8 @@ class Finding:
     port: int
     service: str
     message: str
+    evidence: str = ""        # redacted, human-readable; never raw secret values
+    confirmed: bool = False   # True when actively verified (body/transport), not inferred
 
 
 def check(results: Sequence[Result],

@@ -30,7 +30,7 @@ from textual.widgets import (
 )
 from textual.widgets.selection_list import Selection
 
-from portoscan import export, results_io, sshcve, webcheck
+from portoscan import export, results_io, sshcve, verify, webcheck
 from portoscan.authorization import classify
 from portoscan.compliance import check as compliance_check
 from portoscan.diff import diff_scans
@@ -44,11 +44,13 @@ from portoscan.screens import (
     AuthorizeScreen,
     ComplianceScreen,
     Confirm,
+    DeepAuthorizeScreen,
     DiffScreen,
     HistoryScreen,
     PresetsScreen,
     PromptScreen,
     SettingsScreen,
+    VerifyScreen,
 )
 from portoscan.stats import open_pairs
 from portoscan.storage import Settings, load_scan, recent_scans, save_scan
@@ -102,6 +104,7 @@ class PortoScan(App[int]):
         Binding("t", "toggle_stats", "Stats", id="stats"),
         Binding("c", "compliance", "Policy", id="compliance"),
         Binding("v", "vuln_checks", "Checks", id="vuln"),
+        Binding("V", "verify", "Verify", id="verify"),
         Binding("ctrl+s", "save_preset", "Save preset", id="save-preset"),
         Binding("ctrl+l", "load_preset", "Presets", id="load-preset"),
         Binding("comma", "settings", "Settings", id="settings"),
@@ -115,6 +118,7 @@ class PortoScan(App[int]):
     - `e` export, `i` import, `h` history, `d` diff two scans
     - `r` re-scan open, `ctrl+r` re-scan host, `t` stats
     - `c` policy check, `v` vuln & exposure checks (SSH CVEs, exposed paths)
+    - `V` verify (active, authorized): confirm exposures by body + SSH Terrapin
     - `ctrl+s` save preset, `ctrl+l` presets, `,` settings, `ctrl+t` theme
     """
 
@@ -634,6 +638,58 @@ class PortoScan(App[int]):
         if rate in PRESET_BY_KEY:
             self.query_one("#rate", Select).value = rate
         self._refresh_scope()
+
+    # --------------------------------------------------------- verification
+    @work(exclusive=True, group="verify")
+    async def action_verify(self) -> None:
+        if not self._results:
+            self.notify("Run or load a scan first", severity="warning")
+            return
+        if not self.settings.deep_authorized_ack:
+            ok = await self.push_screen_wait(DeepAuthorizeScreen())
+            if not ok:
+                return
+            self.settings.deep_authorized_ack = True
+            self._persist()
+
+        findings: list = []
+        # actively confirm exposed sensitive paths (reads body, redacts evidence)
+        endpoints = webcheck.web_endpoints(self._results)
+        if endpoints:
+            self.notify(f"Verifying {len(endpoints)} web endpoint(s)…")
+        for host, port, tls in endpoints:
+            for probe in webcheck.PROBES:
+                conf = await verify.confirm_exposure(
+                    host, port, probe.path, probe.kind, probe.severity, tls=tls)
+                if conf.confirmed:
+                    from portoscan.compliance import Finding
+                    findings.append(Finding(
+                        conf.severity, host, port, "http",
+                        f"{conf.path} CONFIRMED exposed ({conf.kind})",
+                        evidence=conf.evidence, confirmed=True))
+        # confirm SSH Terrapin over the real transport
+        ssh_hosts = {(r.host, r.port) for r in self._results
+                     if r.state == "open" and "openssh" in (r.banner or "").lower()}
+        for host, port in sorted(ssh_hosts):
+            terrapin = await verify.confirm_terrapin(host, port)
+            if terrapin is not None:
+                findings.append(terrapin)
+        # include the informational banner CVEs for context
+        findings.extend(sshcve.scan(self._results))
+
+        self._deep_findings = findings
+        saved = ""
+        if findings:
+            try:
+                output = results_io.write_run(
+                    self._output_base(), self._results,
+                    scope=f"{len(self._results)} results (verified)",
+                    fmt=self.settings.output_format,
+                    extra_findings=findings, suffix="verify")
+                saved = str(output.folder)
+            except OSError as error:
+                log.warning("could not save verification: %s", error)
+        await self.push_screen_wait(VerifyScreen(findings, saved_to=saved))
 
     # ----------------------------------------------------------- deep checks
     @work(exclusive=True, group="checks")

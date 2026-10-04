@@ -438,3 +438,53 @@ async def test_vuln_checks_action_combines_ssh_and_web():
         assert "/.env" in messages            # exposed path
         assert "CVE-2024-6387" in messages    # ssh cve
         assert "DB_PASSWORD" not in messages   # no secret captured
+
+
+async def test_verify_action_gate_confirm_and_save(tmp_path):
+    import asyncio
+
+    from portoscan.scan import Result
+    from portoscan.screens import DeepAuthorizeScreen, VerifyScreen
+
+    async def handler(reader, writer):
+        req = await reader.read(1024)
+        path = req.split(b"\r\n", 1)[0].split()[1].decode()
+        if path == "/.env":
+            writer.write(b"HTTP/1.0 200 OK\r\n\r\nAPI_KEY=live-xyz\nDB_PASSWORD=p\n")
+        else:
+            writer.write(b"HTTP/1.0 404 Not Found\r\n\r\nx")
+        await writer.drain()
+        writer.close()
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+
+    app = PortoScan()
+    app.settings.authorized_ack = True
+    app.settings.auto_save_dir = str(tmp_path)
+    app.settings.output_format = "txt"
+    async with server, app.run_test(size=(120, 36)) as pilot:
+        await pilot.pause(0.2)
+        app._results = [Result("127.0.0.1", port, "open", 1.0, "http", "")]
+        app.action_verify()
+        await pilot.pause(0.3)
+        # first run hits the strong-auth gate
+        assert isinstance(app.screen, DeepAuthorizeScreen)
+        await pilot.click("#yes")
+        # wait for the verification pass + save
+        for _ in range(100):
+            await pilot.pause(0.05)
+            if isinstance(app.screen, VerifyScreen):
+                break
+        assert isinstance(app.screen, VerifyScreen)
+        findings = app.screen.findings
+        assert any(f.confirmed and "/.env" in f.message for f in findings)
+        # evidence must not contain the secret value
+        joined = " ".join(f.evidence for f in findings)
+        assert "live-xyz" not in joined
+        # a -verify result folder was written with findings.txt
+        from portoscan.results_io import RESULT_DIR_NAME
+        verify_dirs = [d for d in (tmp_path / RESULT_DIR_NAME).iterdir()
+                       if d.name.endswith("-verify")]
+        assert verify_dirs and (verify_dirs[0] / "findings.txt").exists()
+        text = (verify_dirs[0] / "findings.txt").read_text()
+        assert "CONFIRMED" in text and "live-xyz" not in text

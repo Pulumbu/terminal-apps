@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from portoscan import export
+from portoscan import export, sshcve
 from portoscan.compliance import check as compliance_check
 from portoscan.compliance import summarize as compliance_summary
 from portoscan.report import render_report
@@ -117,12 +117,20 @@ def write_run(
     scope: str = "",
     fmt: str = "txt",
     when: datetime | None = None,
+    extra_findings: Sequence[object] | None = None,
+    suffix: str = "",
 ) -> RunOutput:
-    """Create '<base>/PortoScan Result/<run>' and write the split result files."""
+    """Create '<base>/PortoScan Result/<run>' and write the split result files.
+
+    `extra_findings` (e.g. actively-verified exposures / SSH Terrapin results)
+    are merged into findings.txt and the HTML report. SSH banner-based CVEs are
+    always included (they need no probing).
+    """
     if fmt not in FORMATS:
         fmt = "txt"
     when = when or datetime.now()
-    folder = Path(base) / RESULT_DIR_NAME / run_folder_name(when)
+    name = run_folder_name(when) + (f"-{suffix}" if suffix else "")
+    folder = Path(base) / RESULT_DIR_NAME / name
     folder.mkdir(parents=True, exist_ok=True)
     ext = fmt
     written: list[Path] = []
@@ -141,16 +149,31 @@ def write_run(
     summary_path.write_text(_summary(results, scope, when), encoding="utf-8")
     written.append(summary_path)
 
-    findings = compliance_check(results)
+    policy = compliance_check(results)
     compliance_path = folder / "compliance.txt"
-    lines = [compliance_summary(findings), ""]
-    lines += [f"[{f.severity}] {f.message}" for f in findings]
+    lines = [compliance_summary(policy), ""]
+    lines += [f"[{f.severity}] {f.message}" for f in policy]
     compliance_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     written.append(compliance_path)
 
+    # the full finding set: port policy + SSH banner CVEs + any verified extras
+    extra = list(sshcve.scan(results))
+    if extra_findings:
+        extra += list(extra_findings)
+    all_findings = policy + extra
+    findings_path = folder / "findings.txt"
+    flines = [f"total findings: {len(all_findings)}", ""]
+    for f in all_findings:
+        flines.append(f"[{f.severity}] {f.host}:{f.port}  {f.message}")
+        if getattr(f, "evidence", ""):
+            flines.append(f"    evidence: {f.evidence}")
+    findings_path.write_text("\n".join(flines) + "\n", encoding="utf-8")
+    written.append(findings_path)
+
     report_path = folder / "report.html"
-    report_path.write_text(render_report(results, scope=scope, when=when),
-                           encoding="utf-8")
+    report_path.write_text(
+        render_report(results, scope=scope, when=when, extra_findings=extra),
+        encoding="utf-8")
     written.append(report_path)
 
     return RunOutput(folder=folder, files=written)

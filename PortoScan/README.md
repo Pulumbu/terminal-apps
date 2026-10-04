@@ -29,7 +29,7 @@ portoscan --version
 
 Keys: `s` scan · `x` stop · `/` filter · `e` export · `i` import · `h` history ·
 `d` diff · `r` re-scan open · `ctrl+r` re-scan host · `t` stats · `c` policy · `v` vuln checks ·
-`ctrl+s` save preset · `ctrl+l` presets · `,` settings · `ctrl+t` theme · `ctrl+q` quit.
+`V` verify (active) · `ctrl+s` save preset · `ctrl+l` presets · `,` settings · `ctrl+q` quit.
 
 ## What it does
 
@@ -72,6 +72,23 @@ Keys: `s` scan · `x` stop · `/` filter · `e` export · `i` import · `h` hist
     never read into storage, logged, or written anywhere.** The point is to tell you that you
     have leaked something, not to collect it.
   These run only against the open ports of hosts already in your scan scope.
+- **Active verification** (`V`) — *highly authorized use only* (licensed pen-testers / site
+  owners), behind a stronger acknowledgment. It goes beyond inference to *confirm* findings:
+  - **Exposed paths** — reads the body to confirm the path is genuinely sensitive (not just a
+    200), and reports **redacted evidence**: the key *names*, counts, byte size and a content
+    hash. **Secret values are never read into storage, logged, returned or written** — the
+    tool tells you what is leaked, it does not collect it.
+  - **SSH Terrapin (CVE-2023-48795)** — negotiates the SSH transport read-only, parses the
+    server KEXINIT, and confirms whether an affected cipher is offered without the strict-KEX
+    countermeasure. No authentication, no exploitation.
+  Verified findings (with redacted evidence) are written to a dedicated `…-verify` result
+  folder and into `report.html`.
+
+### Result folder
+
+Every run writes `PortoScan Result/<timestamp>/` containing `open`/`closed`/`filtered`/`all`
+(txt/csv/json), `summary.txt`, `compliance.txt`, **`findings.txt`** (port policy + SSH
+banner CVEs, plus verified findings on a `-verify` run), and a styled **`report.html`**.
 - **HTML report**: every run folder also gets a styled, standalone `report.html`
   (summary, rollups, policy findings, full results; light/dark aware). `e` can export one too.
 - **Headless mode**: run a scan with no TUI, straight to a result folder — for cron/CI on

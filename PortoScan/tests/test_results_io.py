@@ -33,7 +33,7 @@ def test_write_run_creates_split_files(tmp_path):
     assert output.folder == tmp_path / RESULT_DIR_NAME / "2026-01-02_03-04-05"
     names = {p.name for p in output.files}
     assert names == {"all.txt", "open.txt", "closed.txt", "filtered.txt",
-                     "summary.txt", "compliance.txt", "report.html"}
+                     "summary.txt", "compliance.txt", "findings.txt", "report.html"}
 
     open_text = (output.folder / "open.txt").read_text()
     assert "127.0.0.1:80" in open_text and "127.0.0.2:22" in open_text
