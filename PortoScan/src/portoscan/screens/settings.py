@@ -4,9 +4,10 @@ from textual import on
 from textual.app import ComposeResult
 from textual.containers import HorizontalGroup, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Label, Select, Switch
+from textual.widgets import Button, Input, Label, Select, Switch
 
 from portoscan.ports import PROFILES
+from portoscan.results_io import FORMATS
 from portoscan.scan import PRESETS
 from portoscan.storage import Settings
 
@@ -45,6 +46,17 @@ class SettingsScreen(ModalScreen[Settings | None]):
             with HorizontalGroup(classes="row"):
                 yield Label("Grab banners")
                 yield Switch(self.settings.grab_banners, id="grab")
+            with HorizontalGroup(classes="row"):
+                yield Label("Auto-save results")
+                yield Switch(self.settings.auto_save, id="autosave")
+            yield from self._select("fmt", "Output format",
+                                    [(f.upper(), f) for f in FORMATS],
+                                    self.settings.output_format)
+            with HorizontalGroup(classes="row"):
+                yield Label("Save folder")
+                yield Input(self.settings.auto_save_dir,
+                            placeholder="(current working directory)",
+                            id="savedir")
             with HorizontalGroup(id="buttons"):
                 yield Button("Cancel", id="cancel", compact=True)
                 yield Button("Save", id="save", variant="primary", compact=True)
@@ -62,6 +74,9 @@ class SettingsScreen(ModalScreen[Settings | None]):
         self.settings.animations = str(self.query_one("#anim", Select).value)
         self.settings.icons = str(self.query_one("#icons", Select).value)
         self.settings.grab_banners = self.query_one("#grab", Switch).value
+        self.settings.auto_save = self.query_one("#autosave", Switch).value
+        self.settings.output_format = str(self.query_one("#fmt", Select).value)
+        self.settings.auto_save_dir = self.query_one("#savedir", Input).value.strip()
         self.dismiss(self.settings)
 
     @on(Button.Pressed, "#cancel")

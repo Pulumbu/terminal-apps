@@ -21,18 +21,20 @@ from textual.widgets import (
     DataTable,
     Footer,
     Header,
+    Input,
     Label,
     Select,
     TextArea,
 )
 
+from portoscan import export, results_io
 from portoscan.authorization import classify
 from portoscan.icons import glyphs
 from portoscan.paths import Paths, resource_path
 from portoscan.ports import PROFILE_BY_KEY, PROFILES, parse_ports
 from portoscan.scan import PRESET_BY_KEY, PRESETS, Progress, Result, scan
-from portoscan.screens import AuthorizeScreen, Confirm, SettingsScreen
-from portoscan.storage import Settings, save_scan
+from portoscan.screens import AuthorizeScreen, Confirm, HistoryScreen, SettingsScreen
+from portoscan.storage import Settings, load_scan, recent_scans, save_scan
 from portoscan.targets import expand
 from portoscan.themes import ALL_THEMES
 from portoscan.widgets import ScanMeter, ScopeBanner
@@ -51,6 +53,8 @@ class PortoScan(App[int]):
         Binding("x", "stop", "Stop", id="stop"),
         Binding("slash", "focus('#filter')", "Filter", id="filter"),
         Binding("e", "export", "Export", id="export"),
+        Binding("i", "import_results", "Import", id="import"),
+        Binding("h", "history", "History", id="history"),
         Binding("comma", "settings", "Settings", id="settings"),
         Binding("ctrl+t", "cycle_theme", "Theme", id="theme"),
         Binding("f1", "show_help_panel", "Help", id="help"),
@@ -72,6 +76,7 @@ class PortoScan(App[int]):
         self._glyphs = glyphs(self.settings.icons)
         self._results: list[Result] = []
         self._cancel = False
+        self._filter_text = ""
 
     # ---------------------------------------------------------------- compose
     def compose(self) -> ComposeResult:
@@ -99,7 +104,8 @@ class PortoScan(App[int]):
                     yield Button("Scan", id="scan", variant="primary")
                     yield Button("Stop", id="stop", variant="error", disabled=True)
             with VerticalScroll(id="results-pane"):
-                yield Label("", id="filter")  # placeholder; real Input mounted on demand
+                yield Input(placeholder="filter results: text, or a state like 'open'",
+                            id="filter")
                 yield DataTable(id="results", cursor_type="row", zebra_stripes=True)
         with HorizontalGroup(id="statusbar"):
             yield Label("idle", id="status")
@@ -255,11 +261,24 @@ class PortoScan(App[int]):
         self._results = results
         self.scanning = False
         opened = sum(1 for r in results if r.state == "open")
+        scope = f"{len(hosts)} hosts x {len(ports)} ports"
         status.update(f"done: {len(results)} scanned, {opened} open"
                       + (" (stopped)" if self._cancel else ""))
         self._persist_history(hosts, ports, results)
+        if self.settings.auto_save and results:
+            self._auto_save(results, scope)
+
+    def _matches(self, result: Result) -> bool:
+        query = self._filter_text.strip().lower()
+        if not query:
+            return True
+        haystack = (f"{result.host} {result.port} {result.state} "
+                    f"{result.service} {result.banner}").lower()
+        return all(term in haystack for term in query.split())
 
     def _add_row(self, table: DataTable, result: Result) -> None:
+        if not self._matches(result):
+            return
         glyph = self._glyphs.get(result.state, "")
         state_text = Text(f"{glyph} {result.state}")
         state_text.stylize({
@@ -270,6 +289,25 @@ class PortoScan(App[int]):
             result.host, str(result.port), state_text, result.service,
             f"{result.latency_ms:.0f}", result.banner,
         )
+
+    def _rerender(self) -> None:
+        table = self.query_one("#results", DataTable)
+        with self.app.batch_update():
+            table.clear()
+            shown = 0
+            for result in self._results:
+                if self._matches(result):
+                    self._add_row(table, result)
+                    shown += 1
+        if self._results:
+            self.query_one("#status", Label).update(
+                f"{shown}/{len(self._results)} shown"
+                + (f"  (filter: {self._filter_text})" if self._filter_text else ""))
+
+    @on(Input.Changed, "#filter")
+    def _filter_changed(self, event: Input.Changed) -> None:
+        self._filter_text = event.value
+        self._rerender()
 
     def watch_scanning(self, scanning: bool) -> None:
         with self.app.batch_update():
@@ -293,6 +331,57 @@ class PortoScan(App[int]):
                       ports=len(ports), results=results)
         except Exception:  # history is best-effort
             log.exception("failed to save scan history")
+
+    # ------------------------------------------------------------ auto-save
+    def _output_base(self):
+        return results_io.resolve_base(
+            self.settings.auto_save_dir or None,
+            fallbacks=[self.paths.documents, self.paths.data],
+        )
+
+    def _auto_save(self, results, scope: str) -> None:
+        try:
+            output = results_io.write_run(
+                self._output_base(), results, scope=scope,
+                fmt=self.settings.output_format,
+            )
+            self.notify(f"Saved {len(results)} results to {output.folder}")
+        except OSError as error:
+            log.warning("auto-save failed: %s", error)
+            self.notify(f"Could not auto-save results: {error}", severity="error")
+
+    # ---------------------------------------------------------------- import
+    @work
+    async def action_import_results(self) -> None:
+        from textual_fspicker import FileOpen, Filters
+
+        path = await self.push_screen_wait(
+            FileOpen(Path.cwd(), title="Import results (.csv / .json)",
+                     filters=Filters(
+                         ("Results", lambda p: p.suffix.lower() in {".csv", ".json"}),
+                         ("Any", lambda _: True))))
+        if path is None:
+            return
+        try:
+            results = export.load_file(path)
+        except (OSError, ValueError) as error:
+            self.notify(f"Import failed: {error}", severity="error")
+            return
+        self._results = results
+        self._rerender()
+        self.notify(f"Imported {len(results)} results from {Path(path).name}")
+
+    # --------------------------------------------------------------- history
+    @work
+    async def action_history(self) -> None:
+        scans = recent_scans(self.paths.database)
+        scan_id = await self.push_screen_wait(HistoryScreen(scans))
+        if scan_id is None:
+            return
+        results = load_scan(self.paths.database, scan_id)
+        self._results = results
+        self._rerender()
+        self.notify(f"Loaded scan #{scan_id}: {len(results)} results")
 
     # ---------------------------------------------------------------- export
     @work

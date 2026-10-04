@@ -8,3 +8,4 @@ dist/
 .ruff_cache/
 snapshot_report.html
 docs/screenshot-*.svg
+PortoScan Result/

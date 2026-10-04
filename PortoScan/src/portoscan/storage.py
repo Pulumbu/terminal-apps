@@ -51,6 +51,9 @@ class Settings:
     icons: str = "auto"            # auto | unicode | ascii | nerd
     grab_banners: bool = True
     authorized_ack: bool = False
+    auto_save: bool = True
+    output_format: str = "txt"     # txt | csv | json
+    auto_save_dir: str = ""        # "" -> current working directory
     recent_files: list[str] = field(default_factory=list)
 
     @classmethod
@@ -139,3 +142,21 @@ def recent_scans(path: Path, limit: int = 20) -> list[dict[str, Any]]:
             (limit,),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def load_scan(path: Path, scan_id: int) -> list[Result]:
+    """Re-open a past scan's results from the history DB."""
+    from portoscan.scan import Result
+    if not path.exists():
+        return []
+    with connect(path) as conn:
+        rows = conn.execute(
+            "SELECT host, port, state, service, latency_ms, banner "
+            "FROM result WHERE scan_id = ? ORDER BY host, port",
+            (scan_id,),
+        ).fetchall()
+    return [
+        Result(row["host"], int(row["port"]), row["state"],
+               float(row["latency_ms"]), row["service"], row["banner"])
+        for row in rows
+    ]

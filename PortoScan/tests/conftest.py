@@ -1,3 +1,4 @@
+import os
 import tempfile
 
 import pytest
@@ -5,6 +6,10 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def isolated_home(monkeypatch):
-    monkeypatch.setenv("PORTOSCAN_HOME", tempfile.mkdtemp())
+    home = tempfile.mkdtemp()
+    monkeypatch.setenv("PORTOSCAN_HOME", home)
     monkeypatch.setenv("TEXTUAL_ANIMATIONS", "none")
+    # Run each test from a throwaway cwd so any auto-saved "PortoScan Result/"
+    # folder lands in a temp dir, never in the project tree.
+    monkeypatch.chdir(tempfile.mkdtemp())
     yield

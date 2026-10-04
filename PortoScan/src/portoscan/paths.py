@@ -59,3 +59,7 @@ class Paths:
     @property
     def database(self) -> Path:
         return self.data / "portoscan.sqlite3"
+
+    @property
+    def documents(self) -> Path:
+        return Path(DIRS.user_documents_dir)

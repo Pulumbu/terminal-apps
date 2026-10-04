@@ -39,3 +39,18 @@ def test_history_persists_and_reads_back():
     assert scan_id >= 1
     scans = recent_scans(paths.database)
     assert scans[0]["open_count"] == 1 and scans[0]["hosts"] == 1
+
+
+def test_load_scan_round_trip():
+    from portoscan.storage import load_scan, save_scan
+    paths = Paths.resolve().ensure()
+    saved = [
+        Result("127.0.0.1", 80, "open", 1.0, "http", "b"),
+        Result("127.0.0.1", 81, "filtered", 300.0, "", ""),
+    ]
+    scan_id = save_scan(paths.database, scope="1 hosts x 2 ports",
+                        hosts=1, ports=2, results=saved)
+    loaded = load_scan(paths.database, scan_id)
+    assert len(loaded) == 2
+    assert loaded[0].host == "127.0.0.1" and loaded[0].state == "open"
+    assert loaded[1].state == "filtered"

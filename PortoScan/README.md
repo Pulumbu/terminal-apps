@@ -27,8 +27,8 @@ portoscan --paths               # show app-data locations
 portoscan --version
 ```
 
-Keys: `s` scan · `x` stop · `/` filter · `e` export · `,` settings · `ctrl+t` theme ·
-`ctrl+p` command palette · `F1` help · `ctrl+q` quit.
+Keys: `s` scan · `x` stop · `/` filter · `e` export · `i` import · `h` history ·
+`,` settings · `ctrl+t` theme · `ctrl+p` command palette · `F1` help · `ctrl+q` quit.
 
 ## What it does
 
@@ -37,7 +37,13 @@ Keys: `s` scan · `x` stop · `/` filter · `e` export · `,` settings · `ctrl+
   like `22,80,443,8000-8100`
 - **Scan**: async TCP connect, bounded concurrency, adaptive backoff, three honest states
   (open / closed / filtered), optional banner grab, per-environment rate presets, cancellable
-- **Results**: live sortable table, CSV/JSON export, SQLite scan history
+- **Results**: live table with a **filter box** (type text, or a state like `open`),
+  CSV/JSON **export** and **import**, and a **history** screen to re-open past scans from
+  the SQLite database
+- **Auto-save**: every run creates `PortoScan Result/<timestamp>/` in the launch directory
+  (falling back to Documents, then app-data, if that is not writable) containing
+  `open`, `closed`, `filtered`, `all` and `summary` files. Default format is **txt**;
+  switch to CSV or JSON in Settings
 - **UX**: two themes + high-contrast, `NO_COLOR` support, scope banner, progress meter,
   command palette, responsive layout
 
